@@ -127,6 +127,7 @@
 #include "codecop8.h"
 #include "codesc14xxx.h"
 #include "codeace.h"
+#include "code7801.h"
 #include "code78c10.h"
 #include "code75k0.h"
 #include "code78k0.h"
@@ -2873,7 +2874,7 @@ BEGIN
      code16c5x_init(); code16c8x_init(); code17c4x_init();
      codest6_init(); codest7_init(); codest9_init(); code6804_init();
      code3201x_init(); code3202x_init(); code3203x_init(); code3205x_init(); code3206x_init();
-     code9900_init(); codetms7_init(); code370_init(); codemsp_init();
+     code9900_init(); codetms7_init(); code370_init(); codemsp_init(); code7801_init();
      code78c10_init(); code75k0_init(); code78k0_init(); code7720_init(); code77230_init();
      codescmp_init(); codecop8_init(); codesc14xxx_init();
      codeace_init();
