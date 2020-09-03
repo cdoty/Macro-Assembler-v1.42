@@ -1,5 +1,9 @@
+#ifndef _ASMFNUMS_H
+#define _ASMFNUMS_H
 /* asmfnums.h */
 /*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
 /* AS-Portierung                                                             */
 /*                                                                           */
 /* Verwaltung von Datei-Nummern                                              */
@@ -16,7 +20,7 @@ extern void AddFile(char *FName);
 
 extern Integer GetFileNum(char *Name);
 
-extern char *GetFileName(int Num);
+extern const char *GetFileName(int Num);
 
 extern Integer GetFileCount(void);
 
@@ -27,3 +31,4 @@ extern void GetAddressRange(int File, LargeWord *Start, LargeWord *End);
 extern void ResetAddressRanges(void);
 
 extern void asmfnums_init(void);
+#endif /* _ASMFNUMS_H */

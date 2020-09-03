@@ -1,41 +1,63 @@
-ioerrs.$(OBJEXTENSION): ioerrs.rsc
+$(TARG_OBJDIR)ioerrs.msg: ioerrs.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) ioerrs.res -m $@
+ioerrs.rsc: ioerrs.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) ioerrs.res -h $@
 
-ioerrs.msg ioerrs.rsc: ioerrs.res header.res $(RESCOMPTARGET)
-	$(CURRDIR)$(RESCOMPTARGET) ioerrs.res ioerrs.msg ioerrs.rsc
+$(TARG_OBJDIR)cmdarg.msg: cmdarg.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) cmdarg.res -m $@
+cmdarg.rsc: cmdarg.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) cmdarg.res -h $@
 
-cmdarg.$(OBJEXTENSION): cmdarg.rsc
+$(TARG_OBJDIR)tools.msg: tools.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) tools.res -m $@
+tools.rsc: tools.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) tools.res -h $@
 
-cmdarg.msg cmdarg.rsc: cmdarg.res header.res $(RESCOMPTARGET)
-	$(CURRDIR)$(RESCOMPTARGET) cmdarg.res cmdarg.msg cmdarg.rsc
+$(TARG_OBJDIR)as.msg: as.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) as.res -m $@
+as.rsc: as.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) as.res -h $@
 
-toolutils.$(OBJEXTENSION): tools.rsc
+$(TARG_OBJDIR)das.msg: das.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) das.res -m $@
+das.rsc: das.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) das.res -h $@
 
-tools.msg tools.rsc: tools.res header.res $(RESCOMPTARGET)
-	$(CURRDIR)$(RESCOMPTARGET) tools.res tools.msg tools.rsc
+$(TARG_OBJDIR)plist.msg: plist.res tools2.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) plist.res -m $@
+plist.rsc: plist.res tools2.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) plist.res -h $@
 
-as.$(OBJEXTENSION) asminclist.$(OBJEXTENSION) asmmac.$(OBJEXTENSION) asmpars.$(OBJEXTENSION) asmsub.$(OBJEXTENSION): as.rsc
+$(TARG_OBJDIR)alink.msg: alink.res tools2.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) alink.res -m $@
+alink.rsc: alink.res tools2.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) alink.res -h $@
 
-as.msg as.rsc: as.res header.res $(RESCOMPTARGET)
-	$(CURRDIR)$(RESCOMPTARGET) as.res as.msg as.rsc
+$(TARG_OBJDIR)pbind.msg: pbind.res tools2.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) pbind.res -m $@
+pbind.rsc: pbind.res tools2.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) pbind.res -h $@
 
-plist.$(OBJEXTENSION): plist.rsc
+$(TARG_OBJDIR)p2hex.msg: p2hex.res tools2.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) p2hex.res -m $@
+p2hex.rsc: p2hex.res tools2.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) p2hex.res -h $@
 
-plist.msg plist.rsc: plist.res tools2.res header.res $(RESCOMPTARGET)
-	$(CURRDIR)$(RESCOMPTARGET) plist.res plist.msg plist.rsc
+$(TARG_OBJDIR)p2bin.msg: p2bin.res tools2.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) p2bin.res -m $@
+p2bin.rsc: p2bin.res tools2.res header.res $(RESCOMPTARGET)
+	$(CURRDIR)$(RESCOMPTARGET) p2bin.res -h $@
 
-pbind.$(OBJEXTENSION): pbind.rsc
+ALLMSGTARGETS = \
+ $(TARG_OBJDIR)ioerrs.msg \
+ $(TARG_OBJDIR)cmdarg.msg \
+ $(TARG_OBJDIR)tools.msg \
+ $(TARG_OBJDIR)as.msg \
+ $(TARG_OBJDIR)plist.msg \
+ $(TARG_OBJDIR)alink.msg \
+ $(TARG_OBJDIR)pbind.msg \
+ $(TARG_OBJDIR)p2hex.msg \
+ $(TARG_OBJDIR)p2bin.msg
 
-pbind.msg pbind.rsc: pbind.res tools2.res header.res $(RESCOMPTARGET)
-	$(CURRDIR)$(RESCOMPTARGET) pbind.res pbind.msg pbind.rsc
-
-p2hex.$(OBJEXTENSION): p2hex.rsc
-
-p2hex.msg p2hex.rsc: p2hex.res tools2.res header.res $(RESCOMPTARGET)
-	$(CURRDIR)$(RESCOMPTARGET) p2hex.res p2hex.msg p2hex.rsc
-
-p2bin.$(OBJEXTENSION): p2bin.rsc
-
-p2bin.msg p2bin.rsc: p2bin.res tools2.res header.res $(RESCOMPTARGET)
-	$(CURRDIR)$(RESCOMPTARGET) p2bin.res p2bin.msg p2bin.rsc
-
-tex2doc.$(OBJEXTENSION): ushyph.h grhyph.h
+DASMSGTARGETS = \
+ $(TARG_OBJDIR)das.msg

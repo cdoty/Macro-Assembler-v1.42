@@ -1,5 +1,9 @@
+#ifndef _GRHYPH_H
+#define _GRHYPH_H
 /* grhyph.h */
 /*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
 /* AS-Portierung                                                             */
 /*                                                                           */
 /* Trennungsmuster deutsch                                                   */
@@ -10,3 +14,4 @@
 /*****************************************************************************/
 
 extern char *GRHyphens[];
+#endif /* _GRHYPH_H */

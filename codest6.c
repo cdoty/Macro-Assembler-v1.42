@@ -1,11 +1,10 @@
 /* codest6.c */
 /*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
 /* AS-Portierung                                                             */
 /*                                                                           */
 /* Codegenerator ST6-Familie                                                 */
-/*                                                                           */
-/* Historie: 14.11.1996 Grundsteinlegung                                     */
-/*            2. 1.1998 ChkPC ersetzt                                        */
 /*                                                                           */
 /*****************************************************************************/
 
@@ -17,30 +16,14 @@
 #include "asmdef.h"
 #include "asmsub.h"
 #include "asmpars.h"
+#include "asmitree.h"
+#include "asmstructs.h"
 #include "codepseudo.h"
+#include "motpseudo.h"
 #include "codevars.h"
+#include "errmsg.h"
 
-typedef struct
-         {
-          char *Name;
-          Byte Code;
-         } FixedOrder;
-
-typedef struct
-         {
-          char *Name;
-          Word Code;
-         } AccOrder;
-
-
-#define FixedOrderCnt 5
-
-#define RelOrderCnt 4
-
-#define ALUOrderCnt 4
-
-#define AccOrderCnt 3
-
+#include "codest6.h"
 
 #define ModNone (-1)
 #define ModAcc 0
@@ -55,580 +38,904 @@ static Byte AdrMode;
 static ShortInt AdrType;
 static Byte AdrVal;
 
-static LongInt WinAssume;
+static LongInt WinAssume, PRPRVal;
 
-static SimpProc SaveInitProc;
+typedef struct
+{
+  const char *pName;
+  IntType CodeAdrInt;
+} tCPUProps;
 
-static CPUVar CPUST6210,CPUST6215,CPUST6220,CPUST6225;
-
-static FixedOrder *FixedOrders;
-static FixedOrder *RelOrders;
-static FixedOrder *ALUOrders;
-static AccOrder *AccOrders;
-
-/*---------------------------------------------------------------------------------*/
-
-	static void AddFixed(char *NName, Byte NCode)
-BEGIN
-   if (InstrZ>=FixedOrderCnt) exit(255);
-   FixedOrders[InstrZ].Name=NName;
-   FixedOrders[InstrZ++].Code=NCode;
-END
-
-        static void AddRel(char *NName, Byte NCode)
-BEGIN
-   if (InstrZ>=RelOrderCnt) exit(255);
-   RelOrders[InstrZ].Name=NName;
-   RelOrders[InstrZ++].Code=NCode;
-END
-
-        static void AddALU(char *NName, Byte NCode)
-BEGIN
-   if (InstrZ>=ALUOrderCnt) exit(255);
-   ALUOrders[InstrZ].Name=NName;
-   ALUOrders[InstrZ++].Code=NCode;
-END
-
-        static void AddAcc(char *NName, Word NCode)
-BEGIN
-   if (InstrZ>=AccOrderCnt) exit(255);
-   AccOrders[InstrZ].Name=NName;
-   AccOrders[InstrZ++].Code=NCode;
-END
-
-	static void InitFields(void)
-BEGIN
-   FixedOrders=(FixedOrder *) malloc(sizeof(FixedOrder)*FixedOrderCnt); InstrZ=0;
-   AddFixed("NOP" , 0x04);
-   AddFixed("RET" , 0xcd);
-   AddFixed("RETI", 0x4d);
-   AddFixed("STOP", 0x6d);
-   AddFixed("WAIT", 0xed);
-
-   RelOrders=(FixedOrder *) malloc(sizeof(FixedOrder)*RelOrderCnt); InstrZ=0;
-   AddRel("JRZ" , 0x04);
-   AddRel("JRNZ", 0x00);
-   AddRel("JRC" , 0x06);
-   AddRel("JRNC", 0x02);
-
-   ALUOrders=(FixedOrder *) malloc(sizeof(FixedOrder)*ALUOrderCnt); InstrZ=0;
-   AddALU("ADD" , 0x47);
-   AddALU("AND" , 0xa7);
-   AddALU("CP"  , 0x27);
-   AddALU("SUB" , 0xc7);
-
-   AccOrders=(AccOrder *) malloc(sizeof(AccOrder)*AccOrderCnt); InstrZ=0;
-   AddAcc("COM", 0x002d);
-   AddAcc("RLC", 0x00ad);
-   AddAcc("SLA", 0xff5f);
-END
-
-	static void DeinitFields(void)
-BEGIN
-   free(FixedOrders);
-   free(RelOrders);
-   free(ALUOrders);
-   free(AccOrders);
-END
+#define ASSUMEST6Count 2
+static ASSUMERec ASSUMEST6s[ASSUMEST6Count] =
+{
+  { "PRPR",    &PRPRVal  , 0, 0x03, 0x04, NULL },
+  { "ROMBASE", &WinAssume, 0, 0x3f, 0x40, NULL },
+};
+static const tCPUProps *pCurrCPUProps;
 
 /*---------------------------------------------------------------------------------*/
+/* Helper Functions */
 
-	static void ResetAdr(void)
-BEGIN
-   AdrType=ModNone; AdrCnt=0;
-END
+static void ResetAdr(void)
+{
+  AdrType = ModNone; AdrCnt = 0;
+}
 
-	static void ChkAdr(Byte Mask)
-BEGIN
-   if ((AdrType!=ModNone) AND ((Mask AND (1 << AdrType))==0))
-    BEGIN
-     ResetAdr(); WrError(1350);
-    END
-END
+static void DecodeAdr(const tStrComp *pArg, Byte Mask)
+{
+  Integer AdrInt;
+  tEvalResult EvalResult;
 
-	static void DecodeAdr(char *Asc, Byte Mask)
-BEGIN
-#define RegCnt 5
-   static char *RegNames[RegCnt+1]={"A","V","W","X","Y"};
-   static Byte RegCodes[RegCnt+1]={0xff,0x82,0x83,0x80,0x81};
+  ResetAdr();
 
-   Boolean OK;
-   int z;
-   Integer AdrInt;
+  if ((!as_strcasecmp(pArg->Str, "A")) && (Mask & MModAcc))
+  {
+    AdrType = ModAcc;
+    goto chk;
+  }
 
-   ResetAdr();
+  if (!as_strcasecmp(pArg->Str, "(X)"))
+  {
+    AdrType = ModInd;
+    AdrMode = 0;
+    goto chk;
+  }
 
-   if ((strcasecmp(Asc,"A")==0) AND ((Mask & MModAcc)!=0))
-    BEGIN
-     AdrType=ModAcc; ChkAdr(Mask); return;
-    END
+  if (!as_strcasecmp(pArg->Str, "(Y)"))
+  {
+    AdrType = ModInd;
+    AdrMode = 1;
+    goto chk;
+  }
 
-   for (z=0; z<RegCnt; z++)
-    if (strcasecmp(Asc,RegNames[z])==0)
-     BEGIN
-      AdrType=ModDir; AdrCnt=1; AdrVal=RegCodes[z];
-      ChkAdr(Mask); return;
-     END
-
-   if (strcasecmp(Asc,"(X)")==0)
-    BEGIN
-     AdrType=ModInd; AdrMode=0; ChkAdr(Mask); return;
-    END
-
-   if (strcasecmp(Asc,"(Y)")==0)
-    BEGIN
-     AdrType=ModInd; AdrMode=1; ChkAdr(Mask); return;
-    END
-
-   AdrInt=EvalIntExpression(Asc,UInt16,&OK);
-   if (OK)
-    if ((TypeFlag & (1 << SegCode))!=0)
-     BEGIN
-      AdrType=ModDir; AdrVal=(AdrInt & 0x3f)+0x40; AdrCnt=1;
-      if (NOT FirstPassUnknown)
-       if (WinAssume!=(AdrInt >> 6)) WrError(110);
-     END
+  AdrInt = EvalStrIntExpressionWithResult(pArg, UInt16, &EvalResult);
+  if (EvalResult.OK)
+  {
+    if (EvalResult.AddrSpaceMask & (1 << SegCode))
+    {
+      AdrType = ModDir;
+      AdrVal = (AdrInt & 0x3f) + 0x40;
+      AdrCnt=1;
+      if (!mFirstPassUnknown(EvalResult.Flags))
+        if (WinAssume != (AdrInt >> 6)) WrError(ErrNum_InAccPage);
+    }
     else
-     BEGIN
-      if (FirstPassUnknown) AdrInt=Lo(AdrInt);
-      if (AdrInt>0xff) WrError(1320);
+    {
+      if (mFirstPassUnknown(EvalResult.Flags)) AdrInt = Lo(AdrInt);
+      if (AdrInt > 0xff) WrError(ErrNum_OverRange);
       else
-       BEGIN
-	AdrType=ModDir; AdrVal=AdrInt; ChkAdr(Mask); return;
-       END
-     END
+      {
+        AdrType = ModDir;
+        AdrVal = AdrInt;
+        goto chk;
+      }
+    }
+  }
 
-   ChkAdr(Mask);
-END
+chk:
+  if ((AdrType != ModNone) && (!(Mask & (1 << AdrType))))
+  {
+    ResetAdr(); WrError(ErrNum_InvAddrMode);
+  }
+}
 
-	static Boolean DecodePseudo(void)
-BEGIN
-#define ASSUME62Count 1
-   static ASSUMERec ASSUME62s[ASSUME62Count]=
-   	            {{"ROMBASE", &WinAssume, 0, 0x3f, 0x40}};
+static Boolean IsReg(Byte Adr)
+{
+  return ((Adr & 0xfc) == 0x80);
+}
 
-   Boolean OK,Flag;
-   int z;
-   String s;
+static Byte MirrBit(Byte inp)
+{
+  return (((inp & 1) << 2) + (inp & 2) + ((inp & 4) >> 2));
+}
 
-   if (Memo("SFR"))
-    BEGIN
-     CodeEquate(SegData,0,0xff);
-     return True;
-    END
+/*--------------------------------------------------------------------------*/
+/* Bit Symbol Handling */
 
-   if ((Memo("ASCII")) OR (Memo("ASCIZ")))
-    BEGIN
-     if (ArgCnt==0) WrError(1110);
-     else
-      BEGIN
-       z=1; Flag=Memo("ASCIZ");
-       do
-        BEGIN
-	 EvalStringExpression(ArgStr[z],&OK,s);
-	 if (OK)
-	  BEGIN
-	   TranslateString(s);
-	   if (CodeLen+strlen(s)+Ord(Flag)>MaxCodeLen)
-	    BEGIN
-	     WrError(1920); OK=False;
-	    END
-	   else
-	    BEGIN
-	     memcpy(BAsmCode+CodeLen,s,strlen(s)); CodeLen+=strlen(s);
-	     if (Flag) BAsmCode[CodeLen++]=0;
-	    END
-	  END
-	 z++;
-        END
-       while ((OK) AND (z<=ArgCnt));
-       if (NOT OK) CodeLen=0;
-      END
-     return True;
-    END
+/*
+ * Compact representation of bits in symbol table:
+ * bits 0..2: bit position
+ * bits 3...10: register address in DATA/SFR space
+ */
 
-   if (Memo("BYTE"))
-    BEGIN
-     strmaxcpy(OpPart,"BYT",255); DecodeMotoPseudo(False);
-     return True;
-    END
+/*!------------------------------------------------------------------------
+ * \fn     EvalBitPosition(const tStrComp *pArg, Boolean *pOK)
+ * \brief  evaluate bit position
+ * \param  bit position argument (with or without #)
+ * \param  pOK parsing OK?
+ * \return numeric bit position
+ * ------------------------------------------------------------------------ */
 
-   if (Memo("WORD"))
-    BEGIN
-     strmaxcpy(OpPart,"ADR",255); DecodeMotoPseudo(False);
-     return True;
-    END
+static LongWord EvalBitPosition(const tStrComp *pArg, Boolean *pOK)
+{
+  return EvalStrIntExpressionOffs(pArg, !!(*pArg->Str == '#'), UInt3, pOK);
+}
 
-   if (Memo("BLOCK"))
-    BEGIN
-     strmaxcpy(OpPart,"DFS",255); DecodeMotoPseudo(False);
-     return True;
-    END
+/*!------------------------------------------------------------------------
+ * \fn     AssembleBitSymbol(Byte BitPos, Word Address)
+ * \brief  build the compact internal representation of a bit symbol
+ * \param  BitPos bit position in word
+ * \param  Address register address
+ * \return compact representation
+ * ------------------------------------------------------------------------ */
 
-   if (Memo("ASSUME"))
-    BEGIN
-     CodeASSUME(ASSUME62s,ASSUME62Count);
-     return True;
-    END
+static LongWord AssembleBitSymbol(Byte BitPos, Word Address)
+{
+  return (BitPos & 7)
+       | (((LongWord)Address & 0xff) << 3);
+}
 
-   return False;
-END
+/*!------------------------------------------------------------------------
+ * \fn     DecodeBitArg2(LongWord *pResult, const tStrComp *pRegArg, const tStrComp *pBitArg)
+ * \brief  encode a bit symbol, address & bit position separated
+ * \param  pResult resulting encoded bit
+ * \param  pRegArg register argument
+ * \param  pBitArg bit argument
+ * \return True if success
+ * ------------------------------------------------------------------------ */
 
-	static Boolean IsReg(Byte Adr)
-BEGIN
-   return ((Adr & 0xfc)==0x80);
-END
+static Boolean DecodeBitArg2(LongWord *pResult, const tStrComp *pRegArg, const tStrComp *pBitArg)
+{
+  Boolean OK;
+  LongWord Addr;
+  Byte BitPos;
 
-        static Byte MirrBit(Byte inp)
-BEGIN
-   return (((inp & 1) << 2)+(inp & 2)+((inp & 4) >> 2));
-END
+  BitPos = EvalBitPosition(pBitArg, &OK);
+  if (!OK)
+    return False;
 
-	static void MakeCode_ST62(void)
-BEGIN
-   Integer AdrInt;
-   int z;
-   Boolean OK;
+  Addr = EvalStrIntExpression(pRegArg, UInt8, &OK);
+  if (!OK)
+    return False;
 
-   CodeLen=0; DontPrint=False;
+  *pResult = AssembleBitSymbol(BitPos, Addr);
 
-   /* zu ignorierendes */
+  return True;
+}
 
-   if (Memo("")) return;
+/*!------------------------------------------------------------------------
+ * \fn     DecodeBitArg(LongWord *pResult, int Start, int Stop)
+ * \brief  encode a bit symbol from instruction argument(s)
+ * \param  pResult resulting encoded bit
+ * \param  Start first argument
+ * \param  Stop last argument
+ * \return True if success
+ * ------------------------------------------------------------------------ */
 
-   /* Pseudoanweisungen */
+static Boolean DecodeBitArg(LongWord *pResult, int Start, int Stop)
+{
+  *pResult = 0;
 
-   if (DecodePseudo()) return;
+  /* Just one argument -> parse as bit argument */
 
-   /* ohne Argument */
+  if (Start == Stop)
+  {
+    tEvalResult EvalResult;
 
-   for (z=0; z<FixedOrderCnt; z++)
-    if (Memo(FixedOrders[z].Name))
-     BEGIN
-      if (ArgCnt!=0) WrError(1110);
-      else
-       BEGIN
-        CodeLen=1; BAsmCode[0]=FixedOrders[z].Code;
-       END
-      return;
-     END
+    *pResult = EvalStrIntExpressionWithResult(&ArgStr[Start], UInt11, &EvalResult);
+    if (EvalResult.OK)
+      ChkSpace(SegBData, EvalResult.AddrSpaceMask);
+    return EvalResult.OK;
+  }
 
-   /* Datentransfer */
+  /* register & bit position are given as separate arguments */
 
-   if (Memo("LD"))
-    BEGIN
-     if (ArgCnt!=2) WrError(1110);
-     else
-      BEGIN
-       DecodeAdr(ArgStr[1],MModAcc+MModDir+MModInd);
-       switch (AdrType)
-        BEGIN
-         case ModAcc:
-	  DecodeAdr(ArgStr[2],MModDir+MModInd);
-	  switch (AdrType)
-           BEGIN
-	    case ModDir:
-	     if (IsReg(AdrVal))
-    	      BEGIN
-	       CodeLen=1; BAsmCode[0]=0x35+((AdrVal & 3) << 6);
-	      END
-	     else
-	      BEGIN
-	       CodeLen=2; BAsmCode[0]=0x1f; BAsmCode[1]=AdrVal;
-	      END
-             break;
-	    case ModInd:
-	     CodeLen=1; BAsmCode[0]=0x07+(AdrMode << 3);
-	     break;
-	   END
-	  break;
-         case ModDir:
-	  DecodeAdr(ArgStr[2],MModAcc);
-	  if (AdrType!=ModNone)
-	   if (IsReg(AdrVal))
-	    BEGIN
-	     CodeLen=1; BAsmCode[0]=0x3d+((AdrVal & 3) << 6);
-	    END
-	   else
-	    BEGIN
-	     CodeLen=2; BAsmCode[0]=0x9f; BAsmCode[1]=AdrVal;
-	    END
-	   break;
-         case ModInd:
-	  DecodeAdr(ArgStr[2],MModAcc);
-	  if (AdrType!=ModNone)
-	   BEGIN
-	    CodeLen=1; BAsmCode[0]=0x87+(AdrMode << 3);
-	   END
-	  break;
-        END
-      END
-     return;
-    END
+  else if (Stop == Start + 1)
+    return DecodeBitArg2(pResult, &ArgStr[Stop], &ArgStr[Start]);
 
-   if (Memo("LDI"))
-    BEGIN
-     if (ArgCnt!=2) WrError(1110);
-     else
-      BEGIN
-       AdrInt=EvalIntExpression(ArgStr[2],Int8,&OK);
-       if (OK)
-	BEGIN
-	 DecodeAdr(ArgStr[1],MModAcc+MModDir);
-	 switch (AdrType)
-          BEGIN
-	   case ModAcc:
-	    CodeLen=2; BAsmCode[0]=0x17; BAsmCode[1]=Lo(AdrInt);
-	    break;
-	   case ModDir:
-	    CodeLen=3; BAsmCode[0]=0x0d; BAsmCode[1]=AdrVal;
-	    BAsmCode[2]=Lo(AdrInt);
-	    break;
-	  END
-	END
-      END
-     return;
-    END
+  /* other # of arguments not allowed */
 
-   /* Spruenge */
+  else
+  {
+    WrError(ErrNum_WrongArgCnt);
+    return False;
+  }
+}
 
-   for (z=0; z<RelOrderCnt; z++)
-    if (Memo(RelOrders[z].Name))
-     BEGIN
-      if (ArgCnt!=1) WrError(1110);
-      else
-       BEGIN
-        AdrInt=EvalIntExpression(ArgStr[1],UInt16,&OK)-(EProgCounter()+1);
-        if (OK)
-         if ((NOT SymbolQuestionable) AND ((AdrInt<-16) OR (AdrInt>15))) WrError(1370);
-         else
-          BEGIN
-           CodeLen=1;
-           BAsmCode[0]=RelOrders[z].Code+((AdrInt << 3) & 0xf8);
-          END
-       END
-      return;
-     END
+/*!------------------------------------------------------------------------
+ * \fn     DissectBitSymbol(LongWord BitSymbol, Word *pAddress, Byte *pBitPos)
+ * \brief  transform compact represenation of bit (field) symbol into components
+ * \param  BitSymbol compact storage
+ * \param  pAddress (I/O) register address
+ * \param  pBitPos (start) bit position
+ * \return constant True
+ * ------------------------------------------------------------------------ */
 
-   if ((Memo("JP")) OR (Memo("CALL")))
-    BEGIN
-     if (ArgCnt!=1) WrError(1110);
-     else
-      BEGIN
-       AdrInt=EvalIntExpression(ArgStr[1],Int16,&OK);
-       if (OK)
-        if ((AdrInt<0) OR (AdrInt>0xfff)) WrError(1925);
-        else
-         BEGIN
-          CodeLen=2;
-          BAsmCode[0]=0x01+(Ord(Memo("JP")) << 3)+((AdrInt & 0x00f) << 4);
-          BAsmCode[1]=AdrInt >> 4;
-         END
-      END
-     return;
-    END
+static Boolean DissectBitSymbol(LongWord BitSymbol, Word *pAddress, Byte *pBitPos)
+{
+  *pAddress = (BitSymbol >> 3) & 0xffff;
+  *pBitPos = BitSymbol & 7;
+  return True;
+}
 
-   /* Arithmetik */
+/*!------------------------------------------------------------------------
+ * \fn     DissectBit_ST6(char *pDest, int DestSize, LargeWord Inp)
+ * \brief  dissect compact storage of bit (field) into readable form for listing
+ * \param  pDest destination for ASCII representation
+ * \param  DestSize destination buffer size
+ * \param  Inp compact storage
+ * ------------------------------------------------------------------------ */
 
-   for (z=0; z<ALUOrderCnt; z++)
-    if (strncmp(ALUOrders[z].Name,OpPart,strlen(ALUOrders[z].Name))==0)
-     switch (OpPart[strlen(ALUOrders[z].Name)])
-      BEGIN
-       case '\0':
-        if (ArgCnt!=2) WrError(1110);
-        else
-         BEGIN
-          DecodeAdr(ArgStr[1],MModAcc);
-          if (AdrType!=ModNone)
-           BEGIN
-            DecodeAdr(ArgStr[2],MModDir+MModInd);
-            switch (AdrType)
-             BEGIN
-              case ModDir:
-               CodeLen=2; BAsmCode[0]=ALUOrders[z].Code+0x18;
-               BAsmCode[1]=AdrVal;
-               break;
-              case ModInd:
-               CodeLen=1; BAsmCode[0]=ALUOrders[z].Code+(AdrMode << 3);
-               break;
-             END
-           END
-         END
-        return;
-       case 'I':
-        if (ArgCnt!=2) WrError(1110);
-        else
-         BEGIN
-          DecodeAdr(ArgStr[1],MModAcc);
-          if (AdrType!=ModNone)
-           BEGIN
-            BAsmCode[1]=EvalIntExpression(ArgStr[2],Int8,&OK);
-            if (OK)
-             BEGIN
-              CodeLen=2; BAsmCode[0]=ALUOrders[z].Code+0x10;
-             END
-           END
-         END
-        return;
-      END
+static void DissectBit_ST6(char *pDest, int DestSize, LargeWord Inp)
+{
+  Byte BitPos;
+  Word Address;
 
-   if (Memo("CLR"))
-    BEGIN
-     if (ArgCnt!=1) WrError(1110);
-     else
-      BEGIN
-       DecodeAdr(ArgStr[1],MModAcc+MModDir);
-       switch (AdrType)
-        BEGIN
-         case ModAcc:
-	  CodeLen=2; BAsmCode[0]=0xdf; BAsmCode[1]=0xff;
-	  break;
-         case ModDir:
-	  CodeLen=3; BAsmCode[0]=0x0d; BAsmCode[1]=AdrVal; BAsmCode[2]=0;
-	  break;
-        END
-      END
-     return;
-    END
+  DissectBitSymbol(Inp, &Address, &BitPos);
 
-   for (z=0; z<AccOrderCnt; z++)
-    if (Memo(AccOrders[z].Name))
-     BEGIN
-      if (ArgCnt!=1) WrError(1110);
-      else
-       BEGIN
-        DecodeAdr(ArgStr[1],MModAcc);
-        if (AdrType!=ModNone)
-         BEGIN
-          OK=(Hi(AccOrders[z].Code)!=0);
-          CodeLen=1+Ord(OK);
-          BAsmCode[0]=Lo(AccOrders[z].Code);
-          if (OK) BAsmCode[1]=Hi(AccOrders[z].Code);
-         END
-       END
-      return;
-     END
+  as_snprintf(pDest, DestSize, "%02.*u%s.%u",
+              ListRadixBase, (unsigned)Address, GetIntelSuffix(ListRadixBase),
+              (unsigned)BitPos);
+}
 
-   if ((Memo("INC")) OR (Memo("DEC")))
-    BEGIN
-     if (ArgCnt!=1) WrError(1110);
-     else
-      BEGIN
-       DecodeAdr(ArgStr[1],MModDir+MModInd);
-       switch (AdrType)
-        BEGIN
-         case ModDir:
-	  if (IsReg(AdrVal))
-	   BEGIN
-	    CodeLen=1; BAsmCode[0]=0x15+((AdrVal & 3) << 6);
-	    if (Memo("DEC")) BAsmCode[0]+=8;
-	   END
-	  else
-	   BEGIN
-	    CodeLen=2; BAsmCode[0]=0x7f+(Ord(Memo("DEC")) << 7);
-	    BAsmCode[1]=AdrVal;
-	   END
+/*!------------------------------------------------------------------------
+ * \fn     ExpandST6Bit(const tStrComp *pVarName, const struct sStructElem *pStructElem, LargeWord Base)
+ * \brief  expands bit definition when a structure is instantiated
+ * \param  pVarName desired symbol name
+ * \param  pStructElem element definition
+ * \param  Base base address of instantiated structure
+ * ------------------------------------------------------------------------ */
+
+static void ExpandST6Bit(const tStrComp *pVarName, const struct sStructElem *pStructElem, LargeWord Base)
+{
+  LongWord Address = Base + pStructElem->Offset;
+
+  if (!ChkRange(Address, 0, 0xff)
+   || !ChkRange(pStructElem->BitPos, 0, 7))
+    return;
+
+  PushLocHandle(-1);
+  EnterIntSymbol(pVarName, AssembleBitSymbol(pStructElem->BitPos, Address), SegBData, False);
+  PopLocHandle();
+  /* TODO: MakeUseList? */
+}
+
+/*---------------------------------------------------------------------------------*/
+/* Instruction Decoders */
+
+static void DecodeFixed(Word Code)
+{
+  if (ChkArgCnt(0, 0))
+  {
+    CodeLen = 1;
+    BAsmCode[0] = Code;
+  }
+}
+
+static void DecodeLD(Word Code)
+{
+  UNUSED(Code);
+
+  if (ChkArgCnt(2, 2))
+  {
+    DecodeAdr(&ArgStr[1], MModAcc | MModDir | MModInd);
+    switch (AdrType)
+    {
+      case ModAcc:
+        DecodeAdr(&ArgStr[2], MModDir | MModInd);
+        switch (AdrType)
+        {
+          case ModDir:
+            if (IsReg(AdrVal))
+            {
+              CodeLen = 1;
+              BAsmCode[0] = 0x35 + ((AdrVal & 3) << 6);
+            }
+            else
+            {
+              CodeLen = 2;
+              BAsmCode[0] = 0x1f;
+              BAsmCode[1] = AdrVal;
+            }
+            break;
+          case ModInd:
+            CodeLen = 1;
+            BAsmCode[0] = 0x07 + (AdrMode << 3);
+            break;
+        }
+        break;
+      case ModDir:
+        DecodeAdr(&ArgStr[2], MModAcc);
+        if (AdrType != ModNone)
+        {
+          if (IsReg(AdrVal))
+          {
+            CodeLen = 1;
+            BAsmCode[0] = 0x3d + ((AdrVal & 3) << 6);
+          }
+          else
+          {
+            CodeLen = 2;
+            BAsmCode[0] = 0x9f;
+            BAsmCode[1] = AdrVal;
+          }
+        }
+        break;
+      case ModInd:
+        DecodeAdr(&ArgStr[2], MModAcc);
+        if (AdrType != ModNone)
+        {
+          CodeLen = 1;
+          BAsmCode[0] = 0x87 + (AdrMode << 3);
+        }
+        break;
+    }
+  }
+}
+
+static void DecodeLDI(Word Code)
+{
+  UNUSED(Code);
+
+  if (ChkArgCnt(2, 2))
+  {
+    Boolean OK;
+
+    Integer AdrInt = EvalStrIntExpression(&ArgStr[2], Int8, &OK);
+    if (OK)
+    {
+      DecodeAdr(&ArgStr[1], MModAcc | MModDir);
+      switch (AdrType)
+      {
+        case ModAcc:
+          CodeLen = 2;
+          BAsmCode[0] = 0x17;
+          BAsmCode[1] = Lo(AdrInt);
           break;
-         case ModInd:
-	  CodeLen=1;
-	  BAsmCode[0]=0x67+(AdrMode << 3)+(Ord(Memo("DEC")) << 7);
-	  break;
-        END
-      END
-     return;
-    END
+        case ModDir:
+          CodeLen = 3;
+          BAsmCode[0] = 0x0d;
+          BAsmCode[1] = AdrVal;
+          BAsmCode[2] = Lo(AdrInt);
+          break;
+      }
+    }
+  }
+}
 
-   /* Bitbefehle */
+static void DecodeRel(Word Code)
+{
+  if (ChkArgCnt(1, 1))
+  {
+    Boolean OK;
+    tSymbolFlags Flags;
+    Integer AdrInt = EvalStrIntExpressionWithFlags(&ArgStr[1], UInt16, &OK, &Flags) - (EProgCounter() + 1);
 
-   if ((Memo("SET")) OR (Memo("RES")))
-    BEGIN
-     if (ArgCnt!=2) WrError(1110);
-     else
-      BEGIN
-       BAsmCode[0]=MirrBit(EvalIntExpression(ArgStr[1],UInt3,&OK));
-       if (OK)
-	BEGIN
-	 DecodeAdr(ArgStr[2],MModDir);
-	 if (AdrType!=ModNone)
-	  BEGIN
-	   CodeLen=2;
-	   BAsmCode[0]=(BAsmCode[0] << 5)+(Ord(Memo("SET")) << 4)+0x0b;
-	   BAsmCode[1]=AdrVal;
-	  END
-	END
-      END
-     return;
-    END
+    if (OK)
+    {
+      if (!mSymbolQuestionable(Flags) && ((AdrInt < -16) || (AdrInt > 15))) WrError(ErrNum_JmpDistTooBig);
+      else
+      {
+        CodeLen = 1;
+        BAsmCode[0] = Code + ((AdrInt << 3) & 0xf8);
+      }
+    }
+  }
+}
 
-   if ((Memo("JRR")) OR (Memo("JRS")))
-    BEGIN
-     if (ArgCnt!=3) WrError(1110);
-     else
-      BEGIN
-       BAsmCode[0]=MirrBit(EvalIntExpression(ArgStr[1],UInt3,&OK));
-       if (OK)
-	BEGIN
-	 BAsmCode[0]=(BAsmCode[0] << 5)+3+(Ord(Memo("JRS")) << 4);
-	 DecodeAdr(ArgStr[2],MModDir);
-	 if (AdrType!=ModNone)
-	  BEGIN
-	   BAsmCode[1]=AdrVal;
-           AdrInt=EvalIntExpression(ArgStr[3],UInt16,&OK)-(EProgCounter()+3);
-	   if (OK)
-	    if ((NOT SymbolQuestionable) AND ((AdrInt>127) OR (AdrInt<-128))) WrError(1370);
-	    else
-	     BEGIN
-	      CodeLen=3; BAsmCode[2]=Lo(AdrInt);
-	     END
-	  END
-	END
-      END
-     return;
-    END
+static void DecodeJP_CALL(Word Code)
+{
+  if (ChkArgCnt(1, 1))
+  {
+    Boolean OK;
+    Word AdrInt;
+    tSymbolFlags Flags;
 
-   WrXError(1200,OpPart);
-END
+    AdrInt = EvalStrIntExpressionWithFlags(&ArgStr[1], pCurrCPUProps->CodeAdrInt, &OK, &Flags);
+    if (OK)
+    {
+      Word DestPage = AdrInt >> 11;
 
-	static void InitCode_ST62(void)
-BEGIN
-   SaveInitProc();
-   WinAssume=0x40;
-END
+      /* CPU program space's page 1 (800h...0fffh) always accesses ROM space page 1.
+         CPU program space's page 0 (000h...7ffh) accesses 2K ROM space pages as defined by PRPR. */
+         
+      if (!mFirstPassUnknown(Flags) && (DestPage != 1))
+      {
+        Word SrcPage = EProgCounter() >> 11;
 
-	static Boolean IsDef_ST62(void)
-BEGIN
-   return (Memo("SFR"));
-END
+        /* Jump from page 1 is allowed to page defined by PRPR.
+           Jump from any other page is only allowed back to page 1 or within same page. */
 
-        static void SwitchFrom_ST62(void)
-BEGIN
-   DeinitFields();
-END
+        if (DestPage != ((SrcPage == 1) ? PRPRVal : SrcPage)) WrError(ErrNum_InAccPage);
+          
+        AdrInt &= 0x7ff;
+      }
+      CodeLen = 2;
+      BAsmCode[0] = Code + ((AdrInt & 0x00f) << 4);
+      BAsmCode[1] = AdrInt >> 4;
+    }
+  }
+}
 
-	static void SwitchTo_ST62(void)
-BEGIN
-   TurnWords=False; ConstMode=ConstModeIntel; SetIsOccupied=True;
+static void DecodeALU(Word Code)
+{
+  if (ChkArgCnt(2, 2))
+  {
+    DecodeAdr(&ArgStr[1], MModAcc);
+    if (AdrType != ModNone)
+    {
+      DecodeAdr(&ArgStr[2], MModDir | MModInd);
+      switch (AdrType)
+      {
+        case ModDir:
+          CodeLen = 2;
+          BAsmCode[0] = Code + 0x18;
+          BAsmCode[1] = AdrVal;
+          break;
+        case ModInd:
+          CodeLen = 1;
+          BAsmCode[0] = Code + (AdrMode << 3);
+          break;
+      }
+    }
+  }
+}
 
-   PCSymbol="PC"; HeaderID=0x78; NOPCode=0x04;
-   DivideChars=","; HasAttrs=False;
+static void DecodeALUImm(Word Code)
+{
+  if (ChkArgCnt(2, 2))
+  {
+    DecodeAdr(&ArgStr[1], MModAcc);
+    if (AdrType != ModNone)
+    {
+      Boolean OK;
+      BAsmCode[1] = EvalStrIntExpression(&ArgStr[2], Int8, &OK);
+      if (OK)
+      {
+        CodeLen = 2;
+        BAsmCode[0] = Code + 0x10;
+      }
+    }
+  }
+}
 
-   ValidSegs=(1<<SegCode)+(1<<SegData);
-   Grans[SegCode]=1; ListGrans[SegCode]=1; SegInits[SegCode]=0;
-   SegLimits[SegCode] = (MomCPU < CPUST6220) ? 0xfff : 0x7ff;
-   Grans[SegData]=1; ListGrans[SegData]=1; SegInits[SegData]=0;
-   SegLimits[SegData] = 0xff;
+static void DecodeCLR(Word Code)
+{
+  UNUSED(Code);
 
-   MakeCode=MakeCode_ST62; IsDef=IsDef_ST62;
-   SwitchFrom=SwitchFrom_ST62; InitFields();
-END
+  if (ChkArgCnt(1, 1))
+  {
+    DecodeAdr(&ArgStr[1], MModAcc | MModDir);
+    switch (AdrType)
+    {
+      case ModAcc:
+        CodeLen = 2;
+        BAsmCode[0] = 0xdf;
+        BAsmCode[1] = 0xff;
+        break;
+      case ModDir:
+        CodeLen = 3;
+        BAsmCode[0] = 0x0d;
+        BAsmCode[1] = AdrVal;
+        BAsmCode[2] = 0;
+        break;
+    }
+  }
+}
 
-	void codest6_init(void)
-BEGIN
-   CPUST6210=AddCPU("ST6210",SwitchTo_ST62);
-   CPUST6215=AddCPU("ST6215",SwitchTo_ST62);
-   CPUST6220=AddCPU("ST6220",SwitchTo_ST62);
-   CPUST6225=AddCPU("ST6225",SwitchTo_ST62);
+static void DecodeAcc(Word Code)
+{
+  if (ChkArgCnt(1, 1))
+  {
+    DecodeAdr(&ArgStr[1], MModAcc);
+    if (AdrType != ModNone)
+    {
+      BAsmCode[CodeLen++] = Lo(Code);
+      if (Hi(Code))
+        BAsmCode[CodeLen++] = Hi(Code);
+    }
+  }
+}
 
-   SaveInitProc=InitPassProc; InitPassProc=InitCode_ST62;
-END
+static void DecodeINC_DEC(Word Code)
+{
+  if (ChkArgCnt(1, 1))
+  {
+    DecodeAdr(&ArgStr[1], MModDir | MModInd);
+    switch (AdrType)
+    {
+      case ModDir:
+        if (IsReg(AdrVal))
+        {
+          CodeLen = 1;
+          BAsmCode[0] = Code + 0x15 + ((AdrVal & 3) << 6);
+        }
+        else
+        {
+          CodeLen = 2;
+          BAsmCode[0] = 0x7f + (Code << 4);
+          BAsmCode[1] = AdrVal;
+        }
+        break;
+      case ModInd:
+        CodeLen = 1;
+        BAsmCode[0] = 0x67 + (AdrMode << 3) + (Code << 4);
+        break;
+    }
+  }
+}
 
+static void DecodeSET_RES(Word Code)
+{
+  LongWord PackedAddr;
+
+  if (ChkArgCnt(1, 2)
+   && DecodeBitArg(&PackedAddr, 1, ArgCnt))
+  {
+    Word RegAddr;
+    Byte BitPos;
+
+    DissectBitSymbol(PackedAddr, &RegAddr, &BitPos);
+    BAsmCode[0] = (MirrBit(BitPos) << 5) | Code;
+    BAsmCode[1] = RegAddr;
+    CodeLen = 2;
+  }
+}
+
+static void DecodeJRR_JRS(Word Code)
+{
+  LongWord PackedAddr;
+
+  if (ChkArgCnt(2, 3)
+   && DecodeBitArg(&PackedAddr, 1, ArgCnt - 1))
+  {
+    Word RegAddr;
+    Byte BitPos;
+    Boolean OK;
+    Integer AdrInt;
+    tSymbolFlags Flags;
+
+    DissectBitSymbol(PackedAddr, &RegAddr, &BitPos);
+    BAsmCode[0] = (MirrBit(BitPos) << 5) | Code;
+    BAsmCode[1] = RegAddr;
+    AdrInt = EvalStrIntExpressionWithFlags(&ArgStr[ArgCnt], UInt16, &OK, &Flags) - (EProgCounter() + 3);
+    if (OK)
+    {
+      if (!mSymbolQuestionable(Flags) && ((AdrInt > 127) || (AdrInt < -128))) WrError(ErrNum_JmpDistTooBig);
+      else
+      {
+        CodeLen = 3;
+        BAsmCode[2] = Lo(AdrInt);
+      }
+    }
+  }
+}
+
+static void DecodeSFR(Word Code)
+{
+  UNUSED(Code);
+  CodeEquate(SegData, 0, 0xff);
+}
+
+static void DecodeASCII_ASCIZ(Word IsZ)
+{
+  int z, l;
+  Boolean OK;
+  String s;
+
+  if (ChkArgCnt(0, 0))
+  {
+    z = 1;
+    do
+    {
+      EvalStrStringExpression(&ArgStr[z], &OK, s);
+      if (OK)
+      {
+        l = strlen(s);
+        TranslateString(s, -1);
+        if (SetMaxCodeLen(CodeLen + l + IsZ))
+        {
+          WrError(ErrNum_CodeOverflow); OK = False;
+        }
+        else
+        {
+          memcpy(BAsmCode + CodeLen, s, l);
+          CodeLen += l;
+          if (IsZ)
+            BAsmCode[CodeLen++] = 0;
+        }
+      }
+      z++;
+    }
+    while ((OK) && (z <= ArgCnt));
+    if (!OK)
+      CodeLen = 0;
+  }
+}
+
+static void DecodeBYTE(Word Code)
+{
+  UNUSED(Code);
+  strmaxcpy(OpPart.Str, "BYT", STRINGSIZE);
+  DecodeMotoPseudo(False);
+}
+
+static void DecodeWORD(Word Code)
+{
+  UNUSED(Code);
+  strmaxcpy(OpPart.Str, "ADR", STRINGSIZE);
+  DecodeMotoPseudo(False);
+}
+
+static void DecodeBLOCK(Word Code)
+{
+  UNUSED(Code);
+  strmaxcpy(OpPart.Str, "DFS", STRINGSIZE);
+  DecodeMotoPseudo(False);
+}
+
+/*!------------------------------------------------------------------------
+ * \fn     DecodeBIT(Word Code)
+ * \brief  decode BIT instruction
+ * ------------------------------------------------------------------------ */
+
+static void DecodeBIT(Word Code)
+{
+  LongWord BitSpec;
+
+  UNUSED(Code);
+
+  /* if in structure definition, add special element to structure */
+
+  if (ActPC == StructSeg)
+  {
+    Boolean OK;
+    Byte BitPos;
+    PStructElem pElement;
+
+    if (!ChkArgCnt(2, 2))
+      return;
+    BitPos = EvalBitPosition(&ArgStr[2], &OK);
+    if (!OK)
+      return;
+    pElement = CreateStructElem(LabPart.Str);
+    pElement->pRefElemName = as_strdup(ArgStr[1].Str);
+    pElement->OpSize = eSymbolSize8Bit;
+    pElement->BitPos = BitPos;
+    pElement->ExpandFnc = ExpandST6Bit;
+    AddStructElem(pInnermostNamedStruct->StructRec, pElement);
+  }
+  else
+  {
+    if (DecodeBitArg(&BitSpec, 1, ArgCnt))
+    {
+      *ListLine = '=';
+      DissectBit_ST6(ListLine + 1, STRINGSIZE - 3, BitSpec);
+      PushLocHandle(-1);
+      EnterIntSymbol(&LabPart, BitSpec, SegBData, False);
+      PopLocHandle();
+      /* TODO: MakeUseList? */
+    }
+  }
+}
+
+/*---------------------------------------------------------------------------------*/
+/* code table handling */
+
+static void AddFixed(const char *NName, Byte NCode)
+{
+  AddInstTable(InstTable, NName, NCode, DecodeFixed);
+}
+
+static void AddRel(const char *NName, Byte NCode)
+{
+  AddInstTable(InstTable, NName, NCode, DecodeRel);
+}
+
+static void AddALU(const char *NName, const char *NNameImm, Byte NCode)
+{
+  AddInstTable(InstTable, NName, NCode, DecodeALU);
+  AddInstTable(InstTable, NNameImm, NCode, DecodeALUImm);
+}
+
+static void AddAcc(const char *NName, Word NCode)
+{
+  AddInstTable(InstTable, NName, NCode, DecodeAcc);
+}
+
+static void InitFields(void)
+{
+  InstTable = CreateInstTable(201);
+  AddInstTable(InstTable, "LD", 0, DecodeLD);
+  AddInstTable(InstTable, "LDI", 0, DecodeLDI);
+  AddInstTable(InstTable, "JP", 0x09, DecodeJP_CALL);
+  AddInstTable(InstTable, "CALL", 0x01, DecodeJP_CALL);
+  AddInstTable(InstTable, "CLR", 0, DecodeCLR);
+  AddInstTable(InstTable, "INC", 0, DecodeINC_DEC);
+  AddInstTable(InstTable, "DEC", 8, DecodeINC_DEC);
+  AddInstTable(InstTable, "SET", 0x1b, DecodeSET_RES);
+  AddInstTable(InstTable, "RES", 0x0b, DecodeSET_RES);
+  AddInstTable(InstTable, "JRR", 0x03, DecodeJRR_JRS);
+  AddInstTable(InstTable, "JRS", 0x13, DecodeJRR_JRS);
+  AddInstTable(InstTable, "SFR", 0, DecodeSFR);
+  AddInstTable(InstTable, "ASCII", 0, DecodeASCII_ASCIZ);
+  AddInstTable(InstTable, "ASCIZ", 1, DecodeASCII_ASCIZ);
+  AddInstTable(InstTable, "BYTE", 0, DecodeBYTE);
+  AddInstTable(InstTable, "WORD", 0, DecodeWORD);
+  AddInstTable(InstTable, "BLOCK", 0, DecodeBLOCK);
+  AddInstTable(InstTable, "BIT", 0, DecodeBIT);
+
+  AddFixed("NOP" , 0x04);
+  AddFixed("RET" , 0xcd);
+  AddFixed("RETI", 0x4d);
+  AddFixed("STOP", 0x6d);
+  AddFixed("WAIT", 0xed);
+
+  AddRel("JRZ" , 0x04);
+  AddRel("JRNZ", 0x00);
+  AddRel("JRC" , 0x06);
+  AddRel("JRNC", 0x02);
+
+  AddALU("ADD" , "ADDI" , 0x47);
+  AddALU("AND" , "ANDI" , 0xa7);
+  AddALU("CP"  , "CPI"  , 0x27);
+  AddALU("SUB" , "SUBI" , 0xc7);
+
+  AddAcc("COM", 0x002d);
+  AddAcc("RLC", 0x00ad);
+  AddAcc("SLA", 0xff5f);
+}
+
+static void DeinitFields(void)
+{
+  DestroyInstTable(InstTable);
+}
+
+/*!------------------------------------------------------------------------
+ * \fn     MakeCode_ST6(void)
+ * \brief  entry point to decode machine instructions
+ * ------------------------------------------------------------------------ */
+
+static void MakeCode_ST6(void)
+{
+  CodeLen = 0; DontPrint = False;
+
+  /* zu ignorierendes */
+
+  if (Memo("")) return;
+
+  if (!LookupInstTable(InstTable, OpPart.Str))
+    WrStrErrorPos(ErrNum_UnknownInstruction, &OpPart);
+}
+
+/*!------------------------------------------------------------------------
+ * \fn     InitCode_ST6(void)
+ * \brief  per-pass initializations for ST6
+ * ------------------------------------------------------------------------ */
+
+static void InitCode_ST6(void)
+{
+  WinAssume = 0x40;
+  PRPRVal = 0;
+}
+
+/*!------------------------------------------------------------------------
+ * \fn     IsDef_ST6(void)
+ * \brief  does instruction consume label field?
+ * \return true if to be consumed
+ * ------------------------------------------------------------------------ */
+
+static Boolean IsDef_ST6(void)
+{
+  return Memo("SFR") || Memo("BIT");
+}
+
+/*!------------------------------------------------------------------------
+ * \fn     SwitchFrom_ST6(void)
+ * \brief  cleanup after switching away from target
+ * ------------------------------------------------------------------------ */
+
+static void SwitchFrom_ST6(void)
+{
+  DeinitFields();
+}
+
+static Boolean TrueFnc(void)
+{
+  return True;
+}
+
+/*!------------------------------------------------------------------------
+ * \fn     InternSymbol_ST6(char *pArg, TempResult *pErg)
+ * \brief  check for built-in symbols
+ * \param  pAsc ASCII repr. of symbol
+ * \param  pErg result buffer
+ * ------------------------------------------------------------------------ */
+
+static void InternSymbol_ST6(char *pArg, TempResult *pErg)
+{
+  int z;
+#define RegCnt 5
+  static const char RegNames[RegCnt + 1][2] = {"A", "V", "W", "X", "Y"};
+  static const Byte RegCodes[RegCnt + 1] = {0xff, 0x82, 0x83, 0x80, 0x81};
+
+  for (z = 0; z < RegCnt; z++)
+    if (!as_strcasecmp(pArg, RegNames[z]))
+    {
+      pErg->Typ = TempInt;
+      pErg->Contents.Int = RegCodes[z];
+      pErg->AddrSpaceMask |= (1 << SegData);
+    }
+}
+
+/*!------------------------------------------------------------------------
+ * \fn     SwitchTo_ST6(void)
+ * \brief  switch to target
+ * ------------------------------------------------------------------------ */
+
+static void SwitchTo_ST6(void *pUser)
+{
+  int ASSUMEOffset;
+
+  pCurrCPUProps = (const tCPUProps*)pUser;
+  TurnWords = False; ConstMode = ConstModeIntel; SetIsOccupiedFnc = TrueFnc;
+
+  PCSymbol = "PC"; HeaderID = 0x78; NOPCode = 0x04;
+  DivideChars = ","; HasAttrs = False;
+
+  ValidSegs = (1 << SegCode) | (1 << SegData);
+  Grans[SegCode] = 1; ListGrans[SegCode] = 1; SegInits[SegCode] = 0;
+  SegLimits[SegCode] = IntTypeDefs[pCurrCPUProps->CodeAdrInt].Max;
+  Grans[SegData] = 1; ListGrans[SegData] = 1; SegInits[SegData] = 0;
+  SegLimits[SegData] = 0xff;
+
+  ASSUMEOffset = (SegLimits[SegCode] > 0xfff) ? 0 : 1;
+  pASSUMERecs = ASSUMEST6s + ASSUMEOffset;
+  ASSUMERecCnt = ASSUMEST6Count - ASSUMEOffset;
+
+  MakeCode = MakeCode_ST6;
+  IsDef = IsDef_ST6;
+  SwitchFrom = SwitchFrom_ST6;
+  DissectBit = DissectBit_ST6;
+  InternSymbol = InternSymbol_ST6;
+
+  InitFields();
+}
+
+/*!------------------------------------------------------------------------
+ * \fn     codest6_init(void)
+ * \brief  register ST6 target
+ * ------------------------------------------------------------------------ */
+
+static const tCPUProps CPUProps[] =
+{
+  { "ST6200", UInt12 },
+  { "ST6201", UInt12 },
+  { "ST6203", UInt12 },
+  { "ST6208", UInt12 },
+  { "ST6209", UInt12 },
+  { "ST6210", UInt12 },
+  { "ST6215", UInt12 },
+  { "ST6218", UInt13 },
+  { "ST6220", UInt12 },
+  { "ST6225", UInt12 },
+  { "ST6228", UInt13 },
+  { "ST6230", UInt13 },
+  { "ST6232", UInt13 },
+  { "ST6235", UInt13 },
+  { "ST6240", UInt13 },
+  { "ST6242", UInt13 },
+  { "ST6245", UInt12 },
+  { "ST6246", UInt12 },
+  { "ST6252", UInt12 },
+  { "ST6253", UInt12 },
+  { "ST6255", UInt12 },
+  { "ST6260", UInt12 },
+  { "ST6262", UInt12 },
+  { "ST6263", UInt12 },
+  { "ST6265", UInt12 },
+  { "ST6280", UInt13 },
+  { "ST6285", UInt13 },
+  { NULL    , (IntType)0 },
+};
+
+void codest6_init(void)
+{
+  const tCPUProps *pProp;
+
+  for (pProp = CPUProps; pProp->pName; pProp++)
+    (void)AddCPUUser(pProp->pName, SwitchTo_ST6, (void*)pProp, NULL);
+
+  AddInitPassProc(InitCode_ST6);
+}

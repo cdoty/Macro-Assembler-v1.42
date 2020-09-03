@@ -1,66 +1,114 @@
 #!/bin/sh
-# set -v
+#set -v
+
+# assure we don't copy to absolute paths / root dir if $INSTROOT is not set:
+
+if [ "${INSTROOT}" != "" ]; then
+  INSTROOT=${INSTROOT}/
+fi
+BINPATH=${INSTROOT}$1
+INCPATH=${INSTROOT}$2
+MANPATH=${INSTROOT}$3
+LIBPATH=${INSTROOT}$4
+DOCPATH=${INSTROOT}$5
+
+# this is not a perfect solution, but I don't know a better one at the moment:
+
+if [ -f /usr/X11R6/bin/mkdirhier ] ; then
+  MKDIRHIER="/usr/X11R6/bin/mkdirhier"
+else
+  if [ -f /usr/bin/X11/mkdirhier ] ; then
+    MKDIRHIER="/usr/bin/X11/mkdirhier"
+  else
+    MKDIRHIER="mkdir -p"
+  fi
+fi
 
 echo "Installing files:"
 
-if [ "$1" != "" ]; then
- mkdirhier $1
- chmod 755 $1
- for i in asl plist pbind p2hex p2bin; do
-  echo $1/$i
-  strip $i
-  cp $i $1
-  chmod 755 $1/$i
+if [ "${BINPATH}" != "" ]; then
+ ${MKDIRHIER} ${BINPATH}
+ chmod 755 ${BINPATH}
+ for i in asl plist alink pbind p2hex p2bin; do
+  #echo copy ${TARG_OBJDIR}$i${TARG_EXEXTENSION} to ${BINPATH}/$i${TARG_EXEXTENSION} ...
+  strip ${TARG_OBJDIR}$i${TARG_EXEXTENSION}
+  if cp ${TARG_OBJDIR}$i${TARG_EXEXTENSION} ${BINPATH}; then
+   chmod 755 ${BINPATH}/$i${TARG_EXEXTENSION}
+  fi
+ done
+ if test "${TARG_EXEXTENSION}" = ".exe"; then
+  mv ${BINPATH}/asl${TARG_EXEXTENSION} ${BINPATH}/asw${TARG_EXEXTENSION}
+ fi
+fi
+
+if test "${TARG_EXEXTENSION}" = ".exe"; then
+  if test "${OBJDIR}" = ""; then
+    CPINC=./unumlaut
+  else
+    CPINC=${OBJDIR}unumlaut
+  fi
+else
+  CPINC=cp
+fi
+
+if [ "${INCPATH}" != "" ]; then
+ ${MKDIRHIER} ${INCPATH}
+ chmod 755 ${INCPATH}
+ for path in . avr s12z s12z/vh s12z/vc s12z/vca coldfire st6 st7 stm8 stm8/stm8s stm8/stm8l stm8/stm8af stm8/stm8al stm8/stm8t z8; do
+  mkdir ${INCPATH}/${path}
+  chmod 755 ${INCPATH}/${path}
+  for file in include/${path}/*.inc; do
+   base=`basename ${file}`
+   #echo copy ${file} to ${INCPATH}/${path}/${base} ...
+   if ! ${CPINC} ${file} ${INCPATH}/${path}/ ; then
+     exit
+   fi
+   chmod 644 ${INCPATH}/${path}/$base
+  done
  done
 fi
 
-if [ "$2" != "" ]; then
- mkdirhier $2
- chmod 755 $2
- for i in include/*.inc; do
-  base=`basename $i`
-  echo $2/$base
-  cp $i $2
-  chmod 644 $2/$base
+if [ "${MANPATH}" != "" ]; then
+ ${MKDIRHIER} ${MANPATH}/man1
+ chmod 755 ${MANPATH} ${MANPATH}/man1
+ for i in man/*.1; do
+  #echo copy $i to ${MANPATH}/man1/`basename $i` ...
+  if cp $i ${MANPATH}/man1 ; then
+   chmod 644 ${MANPATH}/man1/`basename $i`
+  fi
  done
 fi
 
-if [ "$3" != "" ]; then
- mkdirhier $3/man1
- chmod 755 $3 $3/man1
- for i in *.1; do
-  echo $3/man1/$i
-  cp $i $3/man1
-  chmod 644 $3/man1/$i
+if [ "${LIBPATH}" != "" ]; then
+ ${MKDIRHIER} ${LIBPATH}
+ chmod 755 ${LIBPATH}
+ for file in ${TARG_OBJDIR}*.msg; do
+  base=`basename ${file}`
+  #echo copy ${file} to ${LIBPATH}/${base} ...
+  if cp ${file} ${LIBPATH}/ ; then
+   chmod 644 ${LIBPATH}/${base}
+  fi
  done
 fi
 
-if [ "$4" != "" ]; then
- mkdirhier $4
- chmod 755 $4
- for i in *.msg; do
-  echo $4/$i
-  cp $i $4
-  chmod 644 $4/$i
- done
-fi
-
-if [ "$5" != "" ]; then
- mkdirhier $5
- chmod 755 $5
+if [ "${DOCPATH}" != "" ]; then
+ ${MKDIRHIER} ${DOCPATH}
+ chmod 755 ${DOCPATH}
  for i in DE EN; do
-  echo $5/as-$i.doc
-  cp doc_$i/as.doc $5/as-$i.doc
-  echo $5/as-$i.tex
-  cp doc_$i/as.tex $5/as-$i.tex
-  if [ -f doc_$i/as.dvi ]; then
-   echo $5/as-$i.dvi
-   cp doc_$i/as.dvi $5/as-$i.dvi
-  fi
-  if [ -f doc_$i/as.ps ]; then
-   echo $5/as-$i.ps
-   cp doc_$i/as.ps $5/as-$i.ps
-  fi
-  chmod 644 $5/as-$i.*
+  for ext in doc html dvi ps pdf; do
+   if [ -f doc_$i/as.${ext} ]; then
+    #echo copy doc_$i/as.${ext} to ${DOCPATH}/as-$i.${ext} ...
+    cp doc_$i/as.${ext} ${DOCPATH}/as_$i.${ext}
+   fi
+  done
+  chmod 644 ${DOCPATH}/as_$i.*
  done
+ cp doc_COM/taborg*.tex ${DOCPATH}
+ chmod 644 ${DOCPATH}/taborg*.tex
+ cp doc_COM/ps*.tex ${DOCPATH}
+ chmod 644 ${DOCPATH}/ps*.tex
+ cp doc_COM/biblio.tex ${DOCPATH}
+ chmod 644 ${DOCPATH}/biblio.tex
+ cp COPYING ${DOCPATH}
+ chmod 644 ${DOCPATH}/COPYING
 fi

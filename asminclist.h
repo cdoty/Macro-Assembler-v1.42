@@ -1,5 +1,9 @@
+#ifndef _ASMINCLIST_H
+#define _ASMINCLIST_H
 /* asminclist.c */
 /*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
 /* AS-Portierung                                                             */
 /*                                                                           */
 /* Verwaltung der Include-Verschachtelungsliste                              */
@@ -17,3 +21,4 @@ extern void PrintIncludeList(void);
 extern void ClearIncludeList(void);
 
 extern void asminclist_init(void);
+#endif /* _ASMINCLIST_H */

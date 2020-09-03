@@ -1,5 +1,9 @@
+#ifndef _ASMITREE_H
+#define _ASMITREE_H
 /* asmitree.h */
 /*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
 /* AS-Portierung                                                             */
 /*                                                                           */
 /* Opcode-Abfrage als Binaerbaum                                             */
@@ -14,30 +18,33 @@ typedef void (*InstProc)(
 Word Index
 #endif
 );
+
 typedef struct _TInstTreeNode
-         { 
-          struct _TInstTreeNode *Left,*Right;
-          InstProc Proc;
-          char *Name;
-          Word Index;
-          ShortInt Balance;
-         } TInstTreeNode,*PInstTreeNode;
+{ 
+  struct _TInstTreeNode *Left,*Right;
+  InstProc Proc;
+  char *Name;
+  Word Index;
+  ShortInt Balance;
+} TInstTreeNode,*PInstTreeNode;
 
 typedef struct _TInstTableEntry
-         {
-          InstProc Proc;
-          char *Name;
-          Word Index;
-          int Coll;
-         }
-        TInstTableEntry,*PInstTableEntry;
+{
+  InstProc Proc;
+  char *Name;
+  Word Index;
+  int Coll;
+}
+TInstTableEntry,*PInstTableEntry;
 
-typedef struct
-         {
-          int Fill,Size;
-          Boolean Dynamic;
-          PInstTableEntry Entries;
-         } TInstTable,*PInstTable;
+struct sInstTable
+{
+  int Fill,Size;
+  Boolean Dynamic;
+  PInstTableEntry Entries;
+};
+typedef struct sInstTable TInstTable;
+typedef struct sInstTable *PInstTable;
 
 extern void AddInstTree(PInstTreeNode *Root, char *NName, InstProc NProc, Word NIndex);
 
@@ -54,12 +61,14 @@ extern void SetDynamicInstTable(PInstTable Table);
 
 extern void DestroyInstTable(PInstTable tab);
 
-extern void AddInstTable(PInstTable tab, char *Name, Word Index, InstProc Proc);
+extern void AddInstTable(PInstTable tab, const char *Name, Word Index, InstProc Proc);
 
-extern void RemoveInstTable(PInstTable tab, char *Name);
+extern void RemoveInstTable(PInstTable tab, const char *Name);
 
-extern Boolean LookupInstTable(PInstTable tab, char *Name);
+extern Boolean LookupInstTable(PInstTable tab, const char *Name);
 
 extern void PrintInstTable(FILE *stream, PInstTable tab);
 
 extern void asmitree_init(void);
+
+#endif /* _ASMITREE_H */

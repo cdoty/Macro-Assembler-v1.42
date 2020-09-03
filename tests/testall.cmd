@@ -42,74 +42,7 @@ echo "=================================================================" >..\tes
 echo Summaric results: >> ..\testlog
 set SUMPASS=
 set SUMFAIL=
-call testall t_166
-call testall t_16c5x
-call testall t_16c84
-call testall t_17c42
-call testall t_251
-call testall t_296
-call testall t_29k
-call testall t_32
-call testall t_3201x
-call testall t_3203x
-call testall t_3205x
-call testall t_3206x
-call testall t_370
-call testall t_4004
-call testall t_403
-call testall t_4500
-call testall t_47c00
-call testall t_48
-call testall t_56000
-call testall t_56300
-call testall t_65
-call testall t_6502u
-call testall t_6804
-call testall t_68040
-call testall t_6805
-call testall t_6808
-call testall t_6812
-call testall t_6816
-call testall t_7000
-call testall t_75k0
-call testall t_7700
-call testall t_7720
-call testall t_77230
-call testall t_7725
-call testall t_78c1x
-call testall t_78k0
-call testall t_85
-call testall t_87c800
-call testall t_8X30x
-call testall t_96
-call testall t_960
-call testall t_97c241
-call testall t_9900
-call testall t_ace
-call testall t_avr
-call testall t_bas52
-call testall t_buf32
-call testall t_cop8
-call testall t_f2mc8l
-call testall t_fl90
-call testall t_fl900
-call testall t_full09
-call testall t_h8_3
-call testall t_h8_5
-call testall t_m16c
-call testall t_mcore
-call testall t_mic51
-call testall t_msp
-call testall t_parsys
-call testall t_scmp
-call testall t_secdrive
-call testall t_st6
-call testall t_st7
-call testall t_st9
-call testall t_tms7
-call testall t_xa
-call testall t_z380
-call testall t_z8
+for /D %%T in (t_*) do call testall %T%
 echo successes: %SUMPASS% >> ..\testlog
 echo failures: %SUMFAIL% >> ..\testlog
 type ..\testlog

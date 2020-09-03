@@ -5,11 +5,6 @@
  *
  * (C) 1996 Thomas Sailer <sailer@ife.ee.ethz.ch>
  *
- * 19.08.96: Erstellung
- * 18.01.97: Anpassungen fuer Case-Sensitivitaet
- *  7.07.1998 Fix Zugriffe auf CharTransTable wg. signed chars
- * 18.08.1998 BookKeeping-Aufruf bei RES
- *  9. 1.1999 ChkPC jetzt ueber SegLimits
  */
 
 #include "stdinc.h"
@@ -20,1103 +15,708 @@
 #include "chunks.h"
 #include "asmdef.h"
 #include "asmsub.h"
+#include "errmsg.h"
 #include "asmpars.h"
+#include "asmitree.h"
+#include "codevars.h"
 #include "codepseudo.h"
+#include "tipseudo.h"
 #include "endian.h"
+#include "errmsg.h"
 
 #include "code3202x.h"
 
 /* ---------------------------------------------------------------------- */
 
-typedef struct {
-	char *name;
-	Word code;
-} cmd_fixed;
-typedef struct {
-	char *name;
-	Word code;
-	Boolean must1;
-} cmd_adr;
-typedef struct {
-	char *name;
-	Word code;
-	Word allow_shifts;
-} cmd_adr_shift;
-typedef struct {
-	char *name;
-	Word code;
-	Integer Min;
-	Integer Max;
-	Word mask;
-} cmd_imm;
-typedef struct {
-	char *name;
-	Word mode;
-} adr_mode_t;
-
-static cmd_fixed *cmd_fixed_order;
-#define cmd_fixed_cnt 38
-static cmd_fixed *cmd_jmp_order;
-#define cmd_jmp_cnt 17
-static cmd_adr *cmd_adr_order;
-#define cmd_adr_cnt 44
-static cmd_adr *cmd_adr_2ndadr_order;
-#define cmd_adr_2ndadr_cnt 5
-static cmd_adr_shift *cmd_adr_shift_order;
-#define cmd_adr_shift_cnt 7
-static cmd_imm *cmd_imm_order;
-#define cmd_imm_cnt 17
-static adr_mode_t *adr_modes;
-#define adr_mode_cnt 10
-
-static int instrz;
-
-static void addfixed(char *nname, Word ncode)
+typedef struct
 {
-	if (instrz>=cmd_fixed_cnt) exit(255);
-	cmd_fixed_order[instrz].name=nname;
-	cmd_fixed_order[instrz++].code=ncode;
-}
+  Word Code;
+  Boolean Must1;
+} AdrOrder;
 
-static void addjmp(char *nname, Word ncode)
+typedef struct
 {
-	if (instrz>=cmd_jmp_cnt) exit(255);
-	cmd_jmp_order[instrz].name=nname;
-	cmd_jmp_order[instrz++].code=ncode;
-}
+  Word Code;
+  Word AllowShifts;
+} AdrShiftOrder;
 
-static void addadr(char *nname, Word ncode, Boolean nmust1)
+typedef struct
 {
-	if (instrz>=cmd_adr_cnt) exit(255);
-	cmd_adr_order[instrz].name=nname;
-	cmd_adr_order[instrz].code=ncode;
-	cmd_adr_order[instrz++].must1=nmust1;
-}
+  Word Code;
+  Integer Min;
+  Integer Max;
+  Word Mask;
+} ImmOrder;
 
-static void add2ndadr(char *nname, Word ncode, Boolean nmust1)
+typedef struct
 {
-	if (instrz>=cmd_adr_2ndadr_cnt) exit(255);
-	cmd_adr_2ndadr_order[instrz].name=nname;
-	cmd_adr_2ndadr_order[instrz].code=ncode;
-	cmd_adr_2ndadr_order[instrz++].must1=nmust1;
-}
+  const char *Name;
+  Word Mode;
+} tAdrMode;
 
-static void addshiftadr(char *nname, Word ncode, Word nallow)
+static AdrOrder *AdrOrders;
+#define AdrOrderCnt 44
+static AdrOrder *Adr2ndAdrOrders;
+#define Adr2ndAdrOrderCnt 5
+static AdrShiftOrder *AdrShiftOrders;
+#define AdrShiftOrderCnt 7
+static ImmOrder *ImmOrders;
+#define ImmOrderCnt 17
+static tAdrMode *AdrModes;
+#define AdrModeCnt 10
+
+/* ---------------------------------------------------------------------- */
+
+static Word AdrMode;
+
+static CPUVar CPU32025, CPU32026, CPU32028;
+
+/* ---------------------------------------------------------------------- */
+
+static Word EvalARExpression(const tStrComp *pArg, Boolean *OK)
 {
-	if (instrz>=cmd_adr_shift_cnt) exit(255);
-	cmd_adr_shift_order[instrz].name=nname;
-	cmd_adr_shift_order[instrz].code=ncode;
-	cmd_adr_shift_order[instrz++].allow_shifts=nallow;
-}
-
-static void addimm(char *nname, Word ncode, Integer nmin, Integer nmax,Word nmask)
-{
-	if (instrz>=cmd_imm_cnt) exit(255);
-	cmd_imm_order[instrz].name=nname;
-	cmd_imm_order[instrz].code=ncode;
-	cmd_imm_order[instrz].Min=nmin;
-	cmd_imm_order[instrz].Max=nmax;
-	cmd_imm_order[instrz++].mask=nmask;
-}
-
-static void addadrmode(char *nname, Word nmode)
-{
-	if (instrz>=adr_mode_cnt) exit(255);
-	adr_modes[instrz].name=nname;
-	adr_modes[instrz++].mode=nmode;
-}
-
-static void initfields(void)
-{
-	cmd_fixed_order=(cmd_fixed *) malloc(sizeof(cmd_fixed)*cmd_fixed_cnt); instrz=0;
-	addfixed("ABS",    0xce1b); addfixed("CMPL",   0xce27);
-	addfixed("NEG",    0xce23); addfixed("ROL",    0xce34);
-	addfixed("ROR",    0xce35); addfixed("SFL",    0xce18);
-	addfixed("SFR",    0xce19); addfixed("ZAC",    0xca00);
-	addfixed("APAC",   0xce15); addfixed("PAC",    0xce14);
-	addfixed("SPAC",   0xce16); addfixed("BACC",   0xce25);
-	addfixed("CALA",   0xce24); addfixed("RET",    0xce26);
-	addfixed("RFSM",   0xce36); addfixed("RTXM",   0xce20);
-	addfixed("RXF",    0xce0c); addfixed("SFSM",   0xce37);
-	addfixed("STXM",   0xce21); addfixed("SXF",    0xce0d);
-	addfixed("DINT",   0xce01); addfixed("EINT",   0xce00);
-	addfixed("IDLE",   0xce1f); addfixed("NOP",    0x5500);
-	addfixed("POP",    0xce1d); addfixed("PUSH",   0xce1c);
-	addfixed("RC",     0xce30); addfixed("RHM",    0xce38);
-	addfixed("ROVM",   0xce02); addfixed("RSXM",   0xce06);
-	addfixed("RTC",    0xce32); addfixed("SC",     0xce31);
-	addfixed("SHM",    0xce39); addfixed("SOVM",   0xce03);
-	addfixed("SSXM",   0xce07); addfixed("STC",    0xce33);
-	addfixed("TRAP",   0xce1e); addfixed(NULL, 0);
-
-	cmd_jmp_order=(cmd_fixed *) malloc(sizeof(cmd_fixed)*cmd_jmp_cnt); instrz=0;
-        addjmp("B",      0xff80); addjmp("BANZ",   0xfb80);
-	addjmp("BBNZ",   0xf980); addjmp("BBZ",    0xf880);
-	addjmp("BC",     0x5e80); addjmp("BGEZ",   0xf480);
-	addjmp("BGZ",    0xf180); addjmp("BIOZ",   0xfa80);
-	addjmp("BLEZ",   0xf280); addjmp("BLZ",    0xf380);
-	addjmp("BNC",    0x5f80); addjmp("BNV",    0xf780);
-	addjmp("BNZ",    0xf580); addjmp("BV",     0xf080);
-	addjmp("BZ",     0xf680); addjmp("CALL",   0xfe80);
-	addjmp(NULL,     0);
-
-	cmd_adr_order=(cmd_adr *) malloc(sizeof(cmd_adr)*cmd_adr_cnt); instrz=0;
-	addadr("ADDC",   0x4300, False); addadr("ADDH",   0x4800, False);
-	addadr("ADDS",   0x4900, False); addadr("ADDT",   0x4a00, False);
-	addadr("AND",    0x4e00, False); addadr("LACT",   0x4200, False);
-	addadr("OR",     0x4d00, False); addadr("SUBB",   0x4f00, False);
-	addadr("SUBC",   0x4700, False); addadr("SUBH",   0x4400, False);
-	addadr("SUBS",   0x4500, False); addadr("SUBT",   0x4600, False);
-	addadr("XOR",    0x4c00, False); addadr("ZALH",   0x4000, False);
-	addadr("ZALR",   0x7b00, False); addadr("ZALS",   0x4100, False);
-	addadr("LDP",    0x5200, False); addadr("MAR",    0x5500, False);
-	addadr("LPH",    0x5300, False); addadr("LT",     0x3c00, False);
-	addadr("LTA",    0x3d00, False); addadr("LTD",    0x3f00, False);
-	addadr("LTP",    0x3e00, False); addadr("LTS",    0x5b00, False);
-	addadr("MPY",    0x3800, False); addadr("MPYA",   0x3a00, False);
-	addadr("MPYS",   0x3b00, False); addadr("MPYU",   0xcf00, False);
-	addadr("SPH",    0x7d00, False); addadr("SPL",    0x7c00, False);
-	addadr("SQRA",   0x3900, False); addadr("SQRS",   0x5a00, False);
-	addadr("DMOV",   0x5600, False); addadr("TBLR",   0x5800, False);
-	addadr("TBLW",   0x5900, False); addadr("BITT",   0x5700, False);
-	addadr("LST",    0x5000, False); addadr("LST1",   0x5100, False);
-	addadr("POPD",   0x7a00, False); addadr("PSHD",   0x5400, False);
-	addadr("RPT",    0x4b00, False); addadr("SST",    0x7800, True);
-	addadr("SST1",   0x7900, True);  addadr(NULL,     0,      False);
-
-	cmd_adr_2ndadr_order=(cmd_adr *) malloc(sizeof(cmd_adr)*cmd_adr_2ndadr_cnt); instrz=0;
-	add2ndadr("BLKD",   0xfd00, False); add2ndadr("BLKP",   0xfc00, False);
-	add2ndadr("MAC",    0x5d00, False); add2ndadr("MACD",   0x5c00, False);
-	add2ndadr(NULL,     0,      False);
-
-	cmd_adr_shift_order=(cmd_adr_shift *) malloc(sizeof(cmd_adr_shift)*cmd_adr_shift_cnt); instrz=0;
-	addshiftadr("ADD",    0x0000, 0xf); addshiftadr("LAC",    0x2000, 0xf);
-	addshiftadr("SACH",   0x6800, 0x7); addshiftadr("SACL",   0x6000, 0x7);
-	addshiftadr("SUB",    0x1000, 0xf); addshiftadr("BIT",    0x9000, 0xf);
-	addshiftadr(NULL,     0,      0);
-
-	cmd_imm_order=(cmd_imm *) malloc(sizeof(cmd_imm)*cmd_imm_cnt); instrz=0;
-	addimm("ADDK",   0xcc00,     0,    255,   0xff);
-	addimm("LACK",   0xca00,     0,    255,   0xff);
-	addimm("SUBK",   0xcd00,     0,    255,   0xff);
-	addimm("ADRK",   0x7e00,     0,    255,   0xff);
-	addimm("SBRK",   0x7f00,     0,    255,   0xff);
-	addimm("RPTK",   0xcb00,     0,    255,   0xff);
-	addimm("MPYK",   0xa000, -4096,   4095, 0x1fff);
-	addimm("SPM",    0xce08,     0,      3,    0x3);
-	addimm("CMPR",   0xce50,     0,      3,    0x3);
-	addimm("FORT",   0xce0e,     0,      1,    0x1);
-	addimm("ADLK",   0xd002,     0, 0x7fff, 0xffff);
-	addimm("ANDK",   0xd004,     0, 0x7fff, 0xffff);
-	addimm("LALK",   0xd001,     0, 0x7fff, 0xffff);
-	addimm("ORK",    0xd005,     0, 0x7fff, 0xffff);
-	addimm("SBLK",   0xd003,     0, 0x7fff, 0xffff);
-	addimm("XORK",   0xd006,     0, 0x7fff, 0xffff);
-	addimm(NULL,     0,          0, 0,      0);
-
-	adr_modes=(adr_mode_t *) malloc(sizeof(adr_mode_t)*adr_mode_cnt); instrz=0;
-	addadrmode( "*-",     0x90 ); addadrmode( "*+",     0xa0 );
-	addadrmode( "*BR0-",  0xc0 ); addadrmode( "*0-",    0xd0 );
-	addadrmode( "*AR0-",  0xd0 ); addadrmode( "*0+",    0xe0 );
-	addadrmode( "*AR0+",  0xe0 ); addadrmode( "*BR0+",  0xf0 );
-	addadrmode( "*",      0x80 ); addadrmode( NULL,     0);
-}
-
-static void deinitfields(void)
-{
-	free(cmd_fixed_order);
-	free(cmd_jmp_order);
-	free(cmd_adr_order);
-	free(cmd_adr_2ndadr_order);
-	free(cmd_adr_shift_order);
-	free(cmd_imm_order);
-	free(adr_modes);
+  *OK = True;
+  if ((mytoupper(pArg->Str[0]) == 'A')
+   && (mytoupper(pArg->Str[1]) == 'R')
+   && (pArg->Str[2] >= '0') && (pArg->Str[2] <= '7')
+   && (pArg->Str[3] == '\0'))
+    return pArg->Str[2] - '0';
+  return EvalStrIntExpression(pArg, UInt3, OK);
 }
 
 /* ---------------------------------------------------------------------- */
 
-static Word adr_mode;
-static Boolean adr_ok;
-
-static CPUVar cpu_32025, cpu_32026, cpu_32028;
-
-/* ---------------------------------------------------------------------- */
-
-static Word eval_ar_expression(char *asc, Boolean *ok)
+static Boolean DecodeAdr(const tStrComp *pArg, int MinArgCnt, int aux, Boolean Must1)
 {
-	*ok = True;
-	if ((toupper(asc[0]) == 'A') && (toupper(asc[1]) == 'R') && (asc[2] >= '0') && 
-	    (asc[2] <= '7') && (asc[3] == '\0'))
-		return asc[2] - '0';
-	return EvalIntExpression(asc, UInt3, ok);
+  const tAdrMode *pAdrMode = AdrModes;
+  Byte h;
+  Boolean AdrOK = False;
+  tEvalResult EvalResult;
+
+  while (pAdrMode->Name && as_strcasecmp(pAdrMode->Name, pArg->Str))
+    pAdrMode++;
+  if (!pAdrMode->Name)
+  {
+    if (aux <= ArgCnt)
+    {
+      (void)ChkArgCnt(MinArgCnt, aux - 1);
+      return False;
+    }
+    h = EvalStrIntExpressionWithResult(pArg, Int16, &EvalResult);
+    if (!EvalResult.OK) 
+      return False;
+    if (Must1 && (h >= 0x80) && !mFirstPassUnknown(EvalResult.Flags))
+    {
+      WrError(ErrNum_UnderRange); 
+      return False;
+    }
+    AdrMode = h & 0x7f; 
+    ChkSpace(SegData, EvalResult.AddrSpaceMask);
+    return True;
+  }
+  AdrMode = pAdrMode->Mode;
+  if (aux <= ArgCnt)
+  {
+    h = EvalARExpression(&ArgStr[aux], &AdrOK);
+    if (AdrOK) 
+      AdrMode |= 0x8 | h;
+    return AdrOK;
+  }
+  else
+    return True;
 }
 
 /* ---------------------------------------------------------------------- */
 
-static void decode_adr(char *arg, int aux, Boolean must1)
-{
-	const adr_mode_t *am = adr_modes;
-	Byte h;
+/* prozessorspezifische Befehle */
 
-	adr_ok = False;
-	while (am->name && strcasecmp(am->name, arg))
-		am++;
-	if (!am->name) {
-		if (aux <= ArgCnt) {
-			WrError(1110);
-			return;
-		}
-		h = EvalIntExpression(arg, Int16, &adr_ok);
-		if (!adr_ok) 
-			return;
-		if (must1 && (h >= 0x80) && (!FirstPassUnknown)) {
-			WrError(1315); 
-			adr_ok = False;
-			return;
-		}
-		adr_mode = h & 0x7f; 
-		ChkSpace(SegData);
-		return;
-	}
-	adr_mode = am->mode;
-	if (aux <= ArgCnt) {
-		h = eval_ar_expression(ArgStr[aux], &adr_ok);
-		if (adr_ok) 
-			adr_mode |= 0x8 | h;
-	} else
-		adr_ok = True;
+static void DecodeCNFD(Word Code)
+{
+  UNUSED(Code);
+
+  if (ChkArgCnt(0, 0)
+   && ChkExcludeCPU(CPU32026))
+  {
+    CodeLen = 1; 
+    WAsmCode[0] = 0xce04; 
+  }
+}
+
+static void DecodeCNFP(Word Code)
+{
+  UNUSED(Code);
+
+  if (ChkArgCnt(0, 0)
+   && ChkExcludeCPU(CPU32026))
+  {
+    CodeLen = 1; 
+    WAsmCode[0] = 0xce05;
+  }
+}
+
+static void DecodeCONF(Word Code)
+{
+  Boolean OK;
+
+  UNUSED(Code);
+
+  if (ChkArgCnt(1, 1)
+   && ChkExactCPU(CPU32026))
+  {
+    WAsmCode[0] = 0xce3c | EvalStrIntExpression(&ArgStr[1], UInt2, &OK);
+    if (OK)
+      CodeLen = 1;
+  }
+}
+
+/* kein Argument */
+
+static void DecodeFixed(Word Code)
+{
+  if (ChkArgCnt(0, 0))
+  {
+    CodeLen = 1;
+    WAsmCode[0] = Code;
+  }
+}
+
+/* Spruenge */
+
+static void DecodeJmp(Word Code)
+{
+  Boolean OK;
+
+  if (ChkArgCnt(1, 3))
+  {
+    if (ArgCnt > 1)
+    {
+      OK = DecodeAdr(&ArgStr[2], 1, 3, False);
+      if (OK  && (AdrMode < 0x80))
+      {
+        OK = False;
+        WrError(ErrNum_InvAddrMode);
+      }
+    }
+    else
+    {
+      OK = True;
+      AdrMode = 0;
+    }
+    if (OK)
+    {
+      WAsmCode[1] = EvalStrIntExpression(&ArgStr[1], Int16, &OK);
+      if (OK)
+      {
+        CodeLen = 2; 
+        WAsmCode[0] = Code | (AdrMode & 0x7f);
+      }
+    }
+  }  
+}
+
+/* nur Adresse */
+
+static void DecodeAdrInst(Word Index)
+{
+  const AdrOrder *pOrder = AdrOrders + Index;
+
+  if (ChkArgCnt(1, 2))
+  {
+    if (DecodeAdr(&ArgStr[1], 1, 2, pOrder->Must1))
+    {
+      CodeLen = 1;
+      WAsmCode[0] = pOrder->Code | AdrMode;
+    }
+  }
+}
+
+/* 2 Addressen */
+
+static void Decode2ndAdr(Word Index)
+{
+  const AdrOrder *pOrder = Adr2ndAdrOrders + Index;
+  Boolean OK;
+
+  if (ChkArgCnt(2, 3))
+  {
+    WAsmCode[1] = EvalStrIntExpression(&ArgStr[1], Int16, &OK);
+    if (OK && DecodeAdr(&ArgStr[2], 2, 3, pOrder->Must1))
+    {
+      CodeLen = 2; 
+      WAsmCode[0] = pOrder->Code | AdrMode;
+    }
+  }
+}
+
+/* Adresse & schieben */
+
+static void DecodeShiftAdr(Word Index)
+{
+  const AdrShiftOrder *pOrder = AdrShiftOrders + Index;
+
+  if (ChkArgCnt(1, 3))
+  {
+    Boolean OK;   
+    Word AdrWord;
+    tSymbolFlags Flags;
+
+    if (DecodeAdr(&ArgStr[1], 1, 3, False))
+    {
+      if (ArgCnt < 2)
+      {
+        OK = True; 
+        AdrWord = 0;
+        Flags = eSymbolFlag_None;
+      }
+      else
+      {
+        AdrWord = EvalStrIntExpressionWithFlags(&ArgStr[2], Int4, &OK, &Flags);
+        if (OK && mFirstPassUnknown(Flags))
+          AdrWord = 0;
+      }
+      if (OK) 
+      {
+        if (pOrder->AllowShifts < AdrWord) WrError(ErrNum_InvShiftArg);
+        else
+        {
+          CodeLen = 1; 
+          WAsmCode[0] = pOrder->Code | AdrMode | (AdrWord << 8);
+        }
+      }
+    }
+  }
+}
+
+/* Ein/Ausgabe */
+
+static void DecodeIN_OUT(Word Code)
+{
+  if (ChkArgCnt(2, 3))
+  {
+    if (DecodeAdr(&ArgStr[1], 2, 3, False))
+    {
+      tEvalResult EvalResult;
+      Word AdrWord = EvalStrIntExpressionWithResult(&ArgStr[2], Int4, &EvalResult);
+
+      if (EvalResult.OK)
+      {
+        ChkSpace(SegIO, EvalResult.AddrSpaceMask);
+        CodeLen = 1;
+        WAsmCode[0] = Code | AdrMode | (AdrWord << 8);
+      }
+    }
+  }
+}
+
+/* konstantes Argument */
+
+static void DecodeImm(Word Index)
+{
+  const ImmOrder *pOrder = ImmOrders + Index;
+
+  if (ChkArgCnt(1, (pOrder->Mask != 0xffff) ? 1 : 2))
+  {
+    tEvalResult EvalResult;
+    LongInt AdrLong = EvalStrIntExpressionWithResult(&ArgStr[1], Int32, &EvalResult);
+
+    if (EvalResult.OK)
+    {
+      if (mFirstPassUnknown(EvalResult.Flags))
+        AdrLong &= pOrder->Mask;
+      if (pOrder->Mask == 0xffff)
+      {
+        if (ChkRange(AdrLong, -32768, 65535))
+        {
+          Word AdrWord = 0;
+
+          EvalResult.OK = True;
+          if (ArgCnt == 2)
+          {
+            AdrWord = EvalStrIntExpressionWithResult(&ArgStr[2], Int4, &EvalResult);
+            if (EvalResult.OK && mFirstPassUnknown(EvalResult.Flags)) 
+             AdrWord = 0;
+          }
+          if (EvalResult.OK)
+          {
+            CodeLen = 2;
+            WAsmCode[0] = pOrder->Code | (AdrWord << 8);
+            WAsmCode[1] = AdrLong;
+          }
+        }
+      }
+      else if (ChkRange(AdrLong, pOrder->Min, pOrder->Max))
+      {
+        CodeLen = 1; 
+        WAsmCode[0] = pOrder->Code | (AdrLong & pOrder->Mask);
+      }
+    }
+  }
+}
+
+/* mit Hilfsregistern */
+
+static void DecodeLARP(Word Code)
+{
+  UNUSED(Code);
+
+  if (ChkArgCnt(1, 1))
+  {
+    Boolean OK;
+    Word AdrWord = EvalARExpression(&ArgStr[1], &OK);
+
+    if (OK)
+    {
+      CodeLen = 1; 
+      WAsmCode[0] = 0x5588 | AdrWord;
+    }
+  }
+}
+
+static void DecodeLAR_SAR(Word Code)
+{
+  if (ChkArgCnt(2, 3))
+  {
+    Boolean OK;
+    Word AdrWord = EvalARExpression(&ArgStr[1], &OK);
+
+    if (OK)
+    {
+      if (DecodeAdr(&ArgStr[2], 2, 3, False))
+      {
+        CodeLen = 1;
+        WAsmCode[0] = Code | AdrMode | (AdrWord << 8);
+      }
+    }
+  }
+}
+
+static void DecodeLARK(Word Code)
+{
+  UNUSED(Code);
+
+  if (ChkArgCnt(2, 2))
+  {
+    Boolean OK;
+    Word AdrWord = EvalARExpression(&ArgStr[1], &OK);
+
+    if (OK)
+    {
+      WAsmCode[0] = EvalStrIntExpression(&ArgStr[2], Int8, &OK) & 0xff;
+      if (OK)
+      {
+        CodeLen = 1;
+        WAsmCode[0] |= 0xc000 | (AdrWord << 8);
+      }
+    }
+  }
+}
+
+static void DecodeLRLK(Word Code)
+{
+  UNUSED(Code);
+
+  if (ChkArgCnt(2, 2))
+  {
+    Boolean OK;
+    Word AdrWord = EvalARExpression(&ArgStr[1], &OK);
+
+    if (OK)
+    {
+      WAsmCode[1] = EvalStrIntExpression(&ArgStr[2], Int16, &OK);
+      if (OK)
+      {
+        CodeLen = 2;
+        WAsmCode[0] = 0xd000 | (AdrWord << 8);
+      }
+    }
+  }
+}
+
+static void DecodeLDPK(Word Code)
+{
+  UNUSED(Code);
+
+  if (ChkArgCnt(1, 1))
+  {
+    tEvalResult EvalResult;
+
+    WAsmCode[0] = EvalStrIntExpressionWithResult(&ArgStr[1], UInt16, &EvalResult);
+    if (EvalResult.OK)
+    {
+      if (WAsmCode[0] < 0x1ff)
+        WAsmCode[0] |= 0xc800;
+      else
+      {
+        ChkSpace(SegData, EvalResult.AddrSpaceMask);
+        WAsmCode[0] = ((WAsmCode[0] >> 7) & 0x1ff) | 0xc800;
+      }
+      CodeLen = 1;
+    }
+  }
+}
+
+static void DecodeNORM(Word Code)
+{
+  UNUSED(Code);
+
+  if (ChkArgCnt(1, 1))
+  {
+    if (DecodeAdr(&ArgStr[1], 1, 2, False))
+    {
+      if (AdrMode < 0x80) WrError(ErrNum_InvAddrMode);
+      else
+      {
+        CodeLen = 1;
+        WAsmCode[0] = 0xce82 | (AdrMode & 0x70);
+      }
+    }
+  }
+}
+
+static void DecodePORT(Word Code)
+{
+  UNUSED(Code);
+
+  CodeEquate(SegIO, 0, 15);
 }
 
 /* ---------------------------------------------------------------------- */
 
-static void pseudo_qxx(Integer num)
+static void AddFixed(const char *NName, Word NCode)
 {
-	int z;
-	Boolean ok;
-	double res;
+  AddInstTable(InstTable, NName, NCode, DecodeFixed);
+}
 
-	if (!ArgCnt) {
-		WrError(1110);
-		return;
-	}
-	for(z = 1; z <= ArgCnt; z++) {
-		res = ldexp(EvalFloatExpression(ArgStr[z], Float64, &ok), num);
-		if (!ok) {
-			CodeLen = 0;
-			return;
-		}
-		if ((res > 32767.49) || (res < -32768.49)) {
-			CodeLen = 0;
-			WrError(1320);
-			return;
-		}
-		WAsmCode[CodeLen++] = res;
-	}
+static void AddJmp(const char *NName, Word NCode)
+{
+  AddInstTable(InstTable, NName, NCode, DecodeJmp);
+}
+
+static void AddAdr(const char *NName, Word NCode, Boolean NMust1)
+{
+  if (InstrZ >= AdrOrderCnt) exit(255);
+  AdrOrders[InstrZ].Code = NCode;
+  AdrOrders[InstrZ].Must1 = NMust1;
+  AddInstTable(InstTable, NName, InstrZ++, DecodeAdrInst);
+}
+
+static void Add2ndAdr(const char *NName, Word NCode, Boolean NMust1)
+{
+  if (InstrZ >= Adr2ndAdrOrderCnt) exit(255);
+  Adr2ndAdrOrders[InstrZ].Code = NCode;
+  Adr2ndAdrOrders[InstrZ].Must1 = NMust1;
+  AddInstTable(InstTable, NName, InstrZ++, Decode2ndAdr);
+}
+
+static void AddShiftAdr(const char *NName, Word NCode, Word nallow)
+{
+  if (InstrZ >= AdrShiftOrderCnt) exit(255);
+  AdrShiftOrders[InstrZ].Code = NCode;
+  AdrShiftOrders[InstrZ].AllowShifts = nallow;
+  AddInstTable(InstTable, NName, InstrZ++, DecodeShiftAdr);
+}
+
+static void AddImm(const char *NName, Word NCode, Integer NMin, Integer NMax, Word NMask)
+{
+  if (InstrZ >= ImmOrderCnt) exit(255);
+  ImmOrders[InstrZ].Code = NCode;
+  ImmOrders[InstrZ].Min = NMin;
+  ImmOrders[InstrZ].Max = NMax;
+  ImmOrders[InstrZ].Mask = NMask;
+  AddInstTable(InstTable, NName, InstrZ++, DecodeImm);
+}
+
+static void AddAdrMode(const char *NName, Word NMode)
+{
+  if (InstrZ >= AdrModeCnt) exit(255);
+  AdrModes[InstrZ].Name = NName;
+  AdrModes[InstrZ++].Mode = NMode;
+}
+
+static void InitFields(void)
+{
+  InstTable = CreateInstTable(307);
+  AddInstTable(InstTable, "CNFD", 0, DecodeCNFD);
+  AddInstTable(InstTable, "CNFP", 0, DecodeCNFP);
+  AddInstTable(InstTable, "CONF", 0, DecodeCONF);
+  AddInstTable(InstTable, "OUT", 0xe000, DecodeIN_OUT);
+  AddInstTable(InstTable, "IN", 0x8000, DecodeIN_OUT);
+  AddInstTable(InstTable, "LARP", 0, DecodeLARP);
+  AddInstTable(InstTable, "LAR", 0x3000, DecodeLAR_SAR);
+  AddInstTable(InstTable, "SAR", 0x7000, DecodeLAR_SAR);
+  AddInstTable(InstTable, "LARK", 0, DecodeLARK);
+  AddInstTable(InstTable, "LRLK", 0, DecodeLRLK);
+  AddInstTable(InstTable, "LDPK", 0, DecodeLDPK);
+  AddInstTable(InstTable, "NORM", 0, DecodeNORM);
+  AddInstTable(InstTable, "PORT", 0, DecodePORT);
+
+  AddFixed("ABS",    0xce1b); AddFixed("CMPL",   0xce27);
+  AddFixed("NEG",    0xce23); AddFixed("ROL",    0xce34);
+  AddFixed("ROR",    0xce35); AddFixed("SFL",    0xce18);
+  AddFixed("SFR",    0xce19); AddFixed("ZAC",    0xca00);
+  AddFixed("APAC",   0xce15); AddFixed("PAC",    0xce14);
+  AddFixed("SPAC",   0xce16); AddFixed("BACC",   0xce25);
+  AddFixed("CALA",   0xce24); AddFixed("RET",    0xce26);
+  AddFixed("RFSM",   0xce36); AddFixed("RTXM",   0xce20);
+  AddFixed("RXF",    0xce0c); AddFixed("SFSM",   0xce37);
+  AddFixed("STXM",   0xce21); AddFixed("SXF",    0xce0d);
+  AddFixed("DINT",   0xce01); AddFixed("EINT",   0xce00);
+  AddFixed("IDLE",   0xce1f); AddFixed("NOP",    0x5500);
+  AddFixed("POP",    0xce1d); AddFixed("PUSH",   0xce1c);
+  AddFixed("RC",     0xce30); AddFixed("RHM",    0xce38);
+  AddFixed("ROVM",   0xce02); AddFixed("RSXM",   0xce06);
+  AddFixed("RTC",    0xce32); AddFixed("SC",     0xce31);
+  AddFixed("SHM",    0xce39); AddFixed("SOVM",   0xce03);
+  AddFixed("SSXM",   0xce07); AddFixed("STC",    0xce33);
+  AddFixed("TRAP",   0xce1e);
+
+  AddJmp("B",      0xff80); AddJmp("BANZ",   0xfb80);
+  AddJmp("BBNZ",   0xf980); AddJmp("BBZ",    0xf880);
+  AddJmp("BC",     0x5e80); AddJmp("BGEZ",   0xf480);
+  AddJmp("BGZ",    0xf180); AddJmp("BIOZ",   0xfa80);
+  AddJmp("BLEZ",   0xf280); AddJmp("BLZ",    0xf380);
+  AddJmp("BNC",    0x5f80); AddJmp("BNV",    0xf780);
+  AddJmp("BNZ",    0xf580); AddJmp("BV",     0xf080);
+  AddJmp("BZ",     0xf680); AddJmp("CALL",   0xfe80);
+
+  AdrOrders = (AdrOrder *) malloc(sizeof(AdrOrder) * AdrOrderCnt); InstrZ = 0;
+  AddAdr("ADDC",   0x4300, False); AddAdr("ADDH",   0x4800, False);
+  AddAdr("ADDS",   0x4900, False); AddAdr("ADDT",   0x4a00, False);
+  AddAdr("AND",    0x4e00, False); AddAdr("LACT",   0x4200, False);
+  AddAdr("OR",     0x4d00, False); AddAdr("SUBB",   0x4f00, False);
+  AddAdr("SUBC",   0x4700, False); AddAdr("SUBH",   0x4400, False);
+  AddAdr("SUBS",   0x4500, False); AddAdr("SUBT",   0x4600, False);
+  AddAdr("XOR",    0x4c00, False); AddAdr("ZALH",   0x4000, False);
+  AddAdr("ZALR",   0x7b00, False); AddAdr("ZALS",   0x4100, False);
+  AddAdr("LDP",    0x5200, False); AddAdr("MAR",    0x5500, False);
+  AddAdr("LPH",    0x5300, False); AddAdr("LT",     0x3c00, False);
+  AddAdr("LTA",    0x3d00, False); AddAdr("LTD",    0x3f00, False);
+  AddAdr("LTP",    0x3e00, False); AddAdr("LTS",    0x5b00, False);
+  AddAdr("MPY",    0x3800, False); AddAdr("MPYA",   0x3a00, False);
+  AddAdr("MPYS",   0x3b00, False); AddAdr("MPYU",   0xcf00, False);
+  AddAdr("SPH",    0x7d00, False); AddAdr("SPL",    0x7c00, False);
+  AddAdr("SQRA",   0x3900, False); AddAdr("SQRS",   0x5a00, False);
+  AddAdr("DMOV",   0x5600, False); AddAdr("TBLR",   0x5800, False);
+  AddAdr("TBLW",   0x5900, False); AddAdr("BITT",   0x5700, False);
+  AddAdr("LST",    0x5000, False); AddAdr("LST1",   0x5100, False);
+  AddAdr("POPD",   0x7a00, False); AddAdr("PSHD",   0x5400, False);
+  AddAdr("RPT",    0x4b00, False); AddAdr("SST",    0x7800, True);
+  AddAdr("SST1",   0x7900, True);
+
+  Adr2ndAdrOrders = (AdrOrder *) malloc(sizeof(AdrOrder) * Adr2ndAdrOrderCnt); InstrZ = 0;
+  Add2ndAdr("BLKD",   0xfd00, False); Add2ndAdr("BLKP",   0xfc00, False);
+  Add2ndAdr("MAC",    0x5d00, False); Add2ndAdr("MACD",   0x5c00, False);
+
+  AdrShiftOrders = (AdrShiftOrder *) malloc(sizeof(AdrShiftOrder) * AdrShiftOrderCnt); InstrZ = 0;
+  AddShiftAdr("ADD",    0x0000, 0xf); AddShiftAdr("LAC",    0x2000, 0xf);
+  AddShiftAdr("SACH",   0x6800, 0x7); AddShiftAdr("SACL",   0x6000, 0x7);
+  AddShiftAdr("SUB",    0x1000, 0xf); AddShiftAdr("BIT",    0x9000, 0xf);
+
+  ImmOrders = (ImmOrder *) malloc(sizeof(ImmOrder) * ImmOrderCnt); InstrZ = 0;
+  AddImm("ADDK",   0xcc00,     0,    255,   0xff);
+  AddImm("LACK",   0xca00,     0,    255,   0xff);
+  AddImm("SUBK",   0xcd00,     0,    255,   0xff);
+  AddImm("ADRK",   0x7e00,     0,    255,   0xff);
+  AddImm("SBRK",   0x7f00,     0,    255,   0xff);
+  AddImm("RPTK",   0xcb00,     0,    255,   0xff);
+  AddImm("MPYK",   0xa000, -4096,   4095, 0x1fff);
+  AddImm("SPM",    0xce08,     0,      3,    0x3);
+  AddImm("CMPR",   0xce50,     0,      3,    0x3);
+  AddImm("FORT",   0xce0e,     0,      1,    0x1);
+  AddImm("ADLK",   0xd002,     0, 0x7fff, 0xffff);
+  AddImm("ANDK",   0xd004,     0, 0x7fff, 0xffff);
+  AddImm("LALK",   0xd001,     0, 0x7fff, 0xffff);
+  AddImm("ORK",    0xd005,     0, 0x7fff, 0xffff);
+  AddImm("SBLK",   0xd003,     0, 0x7fff, 0xffff);
+  AddImm("XORK",   0xd006,     0, 0x7fff, 0xffff);
+
+  AdrModes = (tAdrMode *) malloc(sizeof(tAdrMode) * AdrModeCnt); InstrZ = 0;
+  AddAdrMode( "*-",     0x90 ); AddAdrMode( "*+",     0xa0 );
+  AddAdrMode( "*BR0-",  0xc0 ); AddAdrMode( "*0-",    0xd0 );
+  AddAdrMode( "*AR0-",  0xd0 ); AddAdrMode( "*0+",    0xe0 );
+  AddAdrMode( "*AR0+",  0xe0 ); AddAdrMode( "*BR0+",  0xf0 );
+  AddAdrMode( "*",      0x80 ); AddAdrMode( NULL,     0);
+}
+
+static void DeinitFields(void)
+{
+  DestroyInstTable(InstTable);
+
+  free(AdrOrders);
+  free(Adr2ndAdrOrders);
+  free(AdrShiftOrders);
+  free(ImmOrders);
+  free(AdrModes);
 }
 
 /* ---------------------------------------------------------------------- */
 
-static void pseudo_lqxx(int num)
+static void MakeCode_3202x(void) 
 {
-	int z;
-	Boolean ok;
-	double res;
-	LongInt resli;
+  CodeLen = 0; 
+  DontPrint = False;
 
-	if (!ArgCnt) {
-		WrError(1110);
-		return;
-	}
-	for(z = 1; z <= ArgCnt; z++) {
-		res = ldexp(EvalFloatExpression(ArgStr[z], Float64, &ok), num);
-		if (!ok) {
-			CodeLen = 0;
-			return;
-		}
-		if ((res > 2147483647.49) || (res < -2147483647.49)) {
-			CodeLen = 0;
-			WrError(1320);
-			return;
-		}
-		resli = res;
-		WAsmCode[CodeLen++] = resli & 0xffff;
-		WAsmCode[CodeLen++] = resli >> 16;
-	}
+  /* zu ignorierendes */
+
+  if (Memo("")) 
+    return;
+
+  /* Pseudoanweisungen */
+
+  if (DecodeTIPseudo()) 
+    return;
+
+  if (!LookupInstTable(InstTable, OpPart.Str))
+    WrStrErrorPos(ErrNum_UnknownInstruction, &OpPart);
 }
 
 /* ---------------------------------------------------------------------- */
 
-static void define_untyped_label(void)
+static Boolean IsDef_3202x(void)
 {
-	if (LabPart[0]) {
-		PushLocHandle(-1);
-		EnterIntSymbol(LabPart, EProgCounter(), SegNone, False);
-		PopLocHandle();
-	}
+  return Memo("PORT") || IsTIDef();
 }
 
 /* ---------------------------------------------------------------------- */
 
-static void wr_code_byte(Boolean *ok, int *adr, LongInt val)
+static void SwitchFrom_3202x(void)
 {
-	if ((val < -128) || (val > 0xff)) {
-		WrError(1320);
-		*ok = False;
-		return;
-	}
-	WAsmCode[(*adr)++] = val & 0xff;
-	CodeLen = *adr;
+  DeinitFields();
 }
 
 /* ---------------------------------------------------------------------- */
 
-static void wr_code_word(Boolean *ok, int *adr, LongInt val)
+static void SwitchTo_3202x(void)
 {
-	if ((val < -32768) || (val > 0xffff)) {
-		WrError(1320);
-		*ok = False;
-		return;
-	}
-	WAsmCode[(*adr)++] = val;
-	CodeLen = *adr;
-}
-
-/* ---------------------------------------------------------------------- */
-
-static void wr_code_long(Boolean *ok, int *adr, LongInt val)
-{
-	WAsmCode[(*adr)++] = val & 0xffff;
-	WAsmCode[(*adr)++] = val >> 16;
-	CodeLen = *adr;
-}
-
-/* ---------------------------------------------------------------------- */
-
-static void wr_code_byte_hilo(Boolean *ok, int *adr, LongInt val)
-{
-	if ((val < -128) || (val > 0xff)) {
-		WrError(1320);
-		*ok = False;
-		return;
-	}
-	if ((*adr) & 1) 
-		WAsmCode[((*adr)++)/2] |= val & 0xff;
-	else 
-		WAsmCode[((*adr)++)/2] = val << 8;
-	CodeLen = ((*adr)+1)/2;
-}
-
-/* ---------------------------------------------------------------------- */
-
-static void wr_code_byte_lohi(Boolean *ok, int *adr, LongInt val)
-{
-	if ((val < -128) || (val > 0xff)) {
-		WrError(1320);
-		*ok = False;
-		return;
-	}
-	if ((*adr) & 1) 
-		WAsmCode[((*adr)++)/2] |= val << 8;
-	else 
-		WAsmCode[((*adr)++)/2] = val & 0xff;
-	CodeLen = ((*adr)+1)/2;
-}
-
-/* ---------------------------------------------------------------------- */
-
-typedef void (*tcallback)(
-#ifdef __PROTOS__
-Boolean *, int *, LongInt
-#endif
-);
-
-static void pseudo_store(tcallback callback)
-{
-	Boolean ok = True;
-	int adr = 0;
-	int z;
-	TempResult t;
-	unsigned char *cp;
-
-	if (!ArgCnt) {
-		WrError(1110);
-		return;
-	}
-	define_untyped_label();
-	for(z = 1; z <= ArgCnt; z++) {
-		if (!ok)
-			return;
-		EvalExpression(ArgStr[z], &t);
-		switch(t.Typ) {
-		case TempInt:
-			callback(&ok, &adr, t.Contents.Int);
-			break;
-		case TempFloat:
-			WrError(1135);
-			return;
-		case TempString:
-			cp = (unsigned char *)t.Contents.Ascii;
-			while (*cp) 
-				callback(&ok, &adr, CharTransTable[((usint)*cp++)&0xff]);
-			break;
-		default:
-			WrError(1135);
-			return;
-		}
-	}
-}
-
-/* ---------------------------------------------------------------------- */
-
-static Boolean decode_pseudo(void)
-{
-	Word size;
-	Boolean ok;
-	TempResult t;
-	int z,z2;
-	unsigned char *cp;
-	float flt;
-	double dbl, mant;
-	int exp;
-	long lmant;
-	Word w;
-
-	if (Memo("PORT")) {
-		CodeEquate(SegIO, 0, 15);
-		return True;
-	}
-	
-	if (Memo("RES") || Memo("BSS")) {
-		if (ArgCnt != 1) {
-			WrError(1110);
-			return True;
-		}
-		if (Memo("BSS"))
-			define_untyped_label();
-		FirstPassUnknown = False;
-		size = EvalIntExpression(ArgStr[1], Int16, &ok);
-		if (FirstPassUnknown) {
-			WrError(1820);
-			return True;
-		}
-		if (!ok) 
-			return True;
-		DontPrint = True;
-		CodeLen = size;
-		BookKeeping();
-		return True;
-	}
-
-	if(Memo("DATA")) {
-		if (!ArgCnt) {
-			WrError(1110);
-			return True;
-		}
-		ok = True;
-		for(z = 1; (z <= ArgCnt) && ok; z++) {
-			EvalExpression(ArgStr[z], &t);
-			switch(t.Typ) {
-			case TempInt:  
-				if((t.Contents.Int < -32768) || 
-				   (t.Contents.Int > 0xffff)) {
-					WrError(1320); 
-					ok = False;
-				} else
-					WAsmCode[CodeLen++] = t.Contents.Int;
-				break;
-			default:
-			case TempFloat:
-				WrError(1135); 
-				ok = False;
-				break;
-			case TempString:
-				z2 = 0;
-				cp = (unsigned char *)t.Contents.Ascii;
-				while (*cp) {
-					if (z2 & 1)
-						WAsmCode[CodeLen++] |= 
-							(CharTransTable[((usint)*cp++)&0xff]
-							 << 8);
-					else
-						WAsmCode[CodeLen] = 
-							CharTransTable[((usint)*cp++)&0xff];
-					z2++;
-				}
-				if (z2 & 1)
-					CodeLen++;
-				break;
-			}
-		}
-		if (!ok)
-			CodeLen = 0;
-		return True;
-	}
-
-	if(Memo("STRING")) {
-		pseudo_store(wr_code_byte_hilo); 
-		return True;
-	}
-	if(Memo("RSTRING")) {
-		pseudo_store(wr_code_byte_lohi); 
-		return True;
-	}
-	if(Memo("BYTE")) {
-		pseudo_store(wr_code_byte); 
-		return True;
-	}
-	if(Memo("WORD")) {
-		pseudo_store(wr_code_word); 
-		return True;
-	}
-	if(Memo("LONG")) {
-		pseudo_store(wr_code_long); 
-		return True;
-	}
-
-	/* Qxx */
-
-	if((OpPart[0] == 'Q') && (OpPart[1] >= '0') && (OpPart[1] <= '9') &&
-	   (OpPart[2] >= '0') && (OpPart[2] <= '9') && (OpPart[3] == '\0')) {
-		pseudo_qxx(10*(OpPart[1]-'0')+OpPart[2]-'0');
-		return True;
-	}
-
-	/* LQxx */
-
-	if((OpPart[0] == 'L') && (OpPart[1] == 'Q') && (OpPart[2] >= '0') && 
-	   (OpPart[2] <= '9') && (OpPart[3] >= '0') && (OpPart[3] <= '9') && 
-	   (OpPart[4] == '\0')) {
-		pseudo_lqxx(10*(OpPart[2]-'0')+OpPart[3]-'0');
-		return True;
-	}
-
-	/* Floating point definitions */
-
-	if(Memo("FLOAT")) {
-		if (!ArgCnt) {
-			WrError(1110);
-			return True;
-		}
-		define_untyped_label();
-		ok = True;
-		for(z = 1; (z <= ArgCnt) && ok; z++) {
-			flt = EvalFloatExpression(ArgStr[z], Float32, &ok);
-			memcpy(WAsmCode+CodeLen, &flt, sizeof(float));
-			if (BigEndian) {
-				w = WAsmCode[CodeLen];
-				WAsmCode[CodeLen] = WAsmCode[CodeLen+1];
-				WAsmCode[CodeLen+1] = w;
-			}
-			CodeLen += sizeof(float)/2;
-		}
-		if(!ok)
-			CodeLen = 0;
-		return True;
-	}
-
-	if(Memo("DOUBLE")) {
-		if (!ArgCnt) {
-			WrError(1110);
-			return True;
-		}
-		define_untyped_label();
-		ok = True;
-		for(z = 1; (z <= ArgCnt) && ok; z++) {
-			dbl = EvalFloatExpression(ArgStr[z], Float64, &ok);
-			memcpy(WAsmCode+CodeLen, &dbl, sizeof(dbl));
-			if (BigEndian) {
-				w = WAsmCode[CodeLen];
-				WAsmCode[CodeLen] = WAsmCode[CodeLen+3];
-				WAsmCode[CodeLen+3] = w;
-				w = WAsmCode[CodeLen+1];
-				WAsmCode[CodeLen+1] = WAsmCode[CodeLen+2];
-				WAsmCode[CodeLen+2] = w;
-			}
-			CodeLen += sizeof(dbl)/2;
-		}
-		if(!ok)
-			CodeLen = 0;
-		return True;
-	}
-
-	if(Memo("EFLOAT")) {
-		if (!ArgCnt) {
-			WrError(1110);
-			return True;
-		}
-		define_untyped_label();
-		ok = True;
-		for(z = 1; (z <= ArgCnt) && ok; z++) {
-			dbl = EvalFloatExpression(ArgStr[z], Float64, &ok);
-			mant = frexp(dbl, &exp);
-			WAsmCode[CodeLen++] = ldexp(mant, 15);
-			WAsmCode[CodeLen++] = exp-1;
-		}
-		if(!ok)
-			CodeLen = 0;
-		return True;
-	}
-
-	if(Memo("BFLOAT")) {
-		if (!ArgCnt) {
-			WrError(1110);
-			return True;
-		}
-		define_untyped_label();
-		ok = True;
-		for(z = 1; (z <= ArgCnt) && ok; z++) {
-			dbl = EvalFloatExpression(ArgStr[z], Float64, &ok);
-			mant = frexp(dbl, &exp);
-			lmant = ldexp(mant, 31);
-			WAsmCode[CodeLen++] = (lmant & 0xffff);
-			WAsmCode[CodeLen++] = (lmant >> 16);
-			WAsmCode[CodeLen++] = exp-1;
-		}
-		if(!ok)
-			CodeLen = 0;
-		return True;
-	}
-
-	if(Memo("TFLOAT")) {
-		if (!ArgCnt) {
-			WrError(1110);
-			return True;
-		}
-		define_untyped_label();
-		ok = True;
-		for(z = 1; (z <= ArgCnt) && ok; z++) {
-			dbl = EvalFloatExpression(ArgStr[z], Float64, &ok);
-			mant = frexp(dbl, &exp);
-			mant = modf(ldexp(mant, 15), &dbl);
-			WAsmCode[CodeLen+3] = dbl;
-			mant = modf(ldexp(mant, 16), &dbl);
-			WAsmCode[CodeLen+2] = dbl;
-			mant = modf(ldexp(mant, 16), &dbl);
-			WAsmCode[CodeLen+1] = dbl;
-			mant = modf(ldexp(mant, 16), &dbl);
-			WAsmCode[CodeLen] = dbl;
-			CodeLen += 4;
-			WAsmCode[CodeLen++] = ((exp - 1) & 0xffff);
-			WAsmCode[CodeLen++] = ((exp - 1) >> 16);
-		}
-		if(!ok)
-			CodeLen = 0;
-		return True;
-	}
-	return False;
-}
-
-/* ---------------------------------------------------------------------- */
-
-static void make_code_3202x(void) 
-{
-	Boolean ok;
-	Word adr_word;
-	LongInt adr_long;
-	const cmd_fixed *fo;
-	const cmd_adr *ao;
-	const cmd_adr_shift *aso;
-	const cmd_imm *io;
-
-	CodeLen = 0; 
-	DontPrint = False;
-
-	/* zu ignorierendes */
-
-	if(Memo("")) 
-		return;
-
-	/* Pseudoanweisungen */
-
-	if(decode_pseudo()) 
-		return;
-
-	/* prozessorspezifische Befehle */
-
-	if(Memo("CNFD")) {
-		if(ArgCnt) {
-			WrError(1110);
-			return;
-		}
-		if(MomCPU == cpu_32026) {
-			WrError(1500);
-			return;
-		}
-		CodeLen = 1; 
-		WAsmCode[0] = 0xce04; 
-		return;
-	}
-
-	if(Memo("CNFP")) {
-		if(ArgCnt) {
-			WrError(1110);
-			return;
-		}
-		if(MomCPU == cpu_32026) {
-			WrError(1500);
-			return;
-		}
-		CodeLen = 1; 
-		WAsmCode[0] = 0xce05;
-		return;
-	}
-
-	if(Memo("CONF")) {
-		if(ArgCnt != 1) {
-			WrError(1110);
-			return;
-		}
-		if(MomCPU != cpu_32026) {
-			WrError(1500);
-			return;
-		}
-		WAsmCode[0] = 0xce3c|EvalIntExpression(ArgStr[1], UInt2, &ok);
-		if(ok)
-			CodeLen = 1;
-		return;
-	}
-
-	/* kein Argument */
-	
-	for(fo = cmd_fixed_order; fo->name; fo++) {
-		if (Memo(fo->name)) {
-			if(ArgCnt) {
-				WrError(1110);
-				return;
-			}
-			CodeLen = 1;
-			WAsmCode[0] = fo->code;
-			return;
-		}
-	}
-
-	/* Spruenge */
-
-	for(fo = cmd_jmp_order; fo->name; fo++) {
-		if (Memo(fo->name)) {
-			if((ArgCnt < 1) || (ArgCnt > 3)) {
-				WrError(1110);
-				return;
-			}
-			adr_mode = 0;
-			if(ArgCnt > 1) {
-				decode_adr(ArgStr[2], 3, False);
-				if(adr_mode < 0x80)
-					WrError(1350);
-			}
-			WAsmCode[1] = EvalIntExpression(ArgStr[1], 
-							Int16, &ok);
-			if(ok) {
-				CodeLen = 2; 
-				WAsmCode[0] = fo->code | (adr_mode & 0x7f);
-			}	
-			return;
-		}
-	}
-
-	/* nur Adresse */
-
-	for(ao = cmd_adr_order; ao->name; ao++) {
-		if (Memo(ao->name)) {
-			if((ArgCnt < 1) || (ArgCnt > 2)) {
-				WrError(1110);
-				return;
-			}
-			decode_adr(ArgStr[1], 2, ao->must1);
-			if(adr_ok) {
-				CodeLen = 1;
-				WAsmCode[0] = ao->code | adr_mode;
-			}
-			return;
-		}
-	}
-
-	/* 2 Addressen */
-
-	for(ao = cmd_adr_2ndadr_order; ao->name; ao++) {
-		if (Memo(ao->name)) {
-			if((ArgCnt < 2) || (ArgCnt > 3)) {
-				WrError(1110);
-				return;
-			}
-			WAsmCode[1] = EvalIntExpression(ArgStr[1], Int16, &ok);
-			decode_adr(ArgStr[2], 3, ao->must1);
-			if(ok && adr_ok) {
-				CodeLen = 2; 
-				WAsmCode[0] = ao->code | adr_mode;
-			}
-			return;
-		}
-	}
-
-	/* Adresse & schieben */
-
-	for(aso = cmd_adr_shift_order; aso->name; aso++) {
-		if (Memo(aso->name)) {
-			if((ArgCnt < 1) || (ArgCnt > 3)) {
-				WrError(1110);
-				return;
-			}
-			decode_adr(ArgStr[1], 3, False);
-			if(!adr_ok) 
-				return;
-			if(ArgCnt < 2) {
-				ok = True; 
-				adr_word = 0;
-			} else {
-				adr_word = EvalIntExpression(ArgStr[2], Int4, 
-							     &ok);
-				if (ok && FirstPassUnknown) 
-					adr_word = 0;
-			}
-			if(!ok) 
-				return;
-			if(aso->allow_shifts < adr_word) {
-				WrError(1380);
-				return;
-			}
-			CodeLen = 1; 
-			WAsmCode[0] = aso->code | adr_mode | (adr_word << 8);
-			return;
-		}
-	}
-
-	/* Ein/Ausgabe */
-
-	if((Memo("IN")) || (Memo("OUT"))) {		
-		if((ArgCnt < 2) || (ArgCnt > 3)) {
-			WrError(1110);
-			return;
-		}
-		decode_adr(ArgStr[1], 3, False);
-		if(!adr_ok)
-			return;
-		adr_word = EvalIntExpression(ArgStr[2], Int4, &ok);
-		if(!ok)
-			return;
-		ChkSpace(SegIO);
-		CodeLen = 1;
-		WAsmCode[0] = ((Memo("OUT")) ? 0xe000 : 0x8000) | adr_mode | 
-			(adr_word << 8);
-		return;
-	}
-
-	/* konstantes Argument */
-
-	for(io = cmd_imm_order; io->name; io++) {
-		if (Memo(io->name)) {
-			if((ArgCnt < 1) || (ArgCnt > 2) || 
-			   ((ArgCnt == 2) && (io->mask != 0xffff))) {
-				WrError(1110);
-				return;
-			}
-			adr_long = EvalIntExpression(ArgStr[1], Int32, &ok);
-			if(!ok)
-				return;
-			if(FirstPassUnknown)
-				adr_long &= io->mask;
-			if(io->mask == 0xffff) {
-				if(adr_long < -32768) {
-					WrError(1315);
-					return;
-				}
-				if(adr_long > 65535) {
-					WrError(1320);
-					return;
-				}
-				adr_word = 0;
-				ok = True;
-				if(ArgCnt == 2) {
-					adr_word = EvalIntExpression(ArgStr[2],
-								     Int4, 
-								     &ok);
-					if(ok && FirstPassUnknown) 
-						adr_word = 0;
-				}
-				if(!ok)
-					return;                
-				CodeLen = 2;
-				WAsmCode[0] = io->code | (adr_word << 8);
-				WAsmCode[1] = adr_long;
-				return;
-			}
-			if(adr_long < io->Min) {
-				WrError(1315);
-				return;
-			}
-			if(adr_long > io->Max) {
-				WrError(1320);
-				return;
-			}
-			CodeLen = 1; 
-			WAsmCode[0] = io->code | (adr_long & io->mask);
-			return;
-		}
-	}
-
-	/* mit Hilfsregistern */
-
-	if(Memo("LARP")) {
-		if(ArgCnt != 1) {
-			WrError(1110);
-			return;
-		}
-		adr_word = eval_ar_expression(ArgStr[1], &ok);
-		if(!ok)
-			return;
-		CodeLen = 1; 
-		WAsmCode[0] = 0x5588 | adr_word;
-		return;
-	}
-
-	if((Memo("LAR")) OR (Memo("SAR"))) {
-		if((ArgCnt < 2) || (ArgCnt > 3)) {
-			WrError(1110);
-			return;
-		}
-		adr_word = eval_ar_expression(ArgStr[1], &ok);
-		if(!ok)
-			return;
-		decode_adr(ArgStr[2], 3, False);
-		if(!adr_ok)
-			return;	  
-		CodeLen = 1;
-		WAsmCode[0] = ((Memo("SAR")) ? 0x7000 : 0x3000) | adr_mode | 
-			(adr_word << 8);
-		return;
-	}
-
-	if(Memo("LARK")) {
-		if(ArgCnt != 2) {
-			WrError(1110);
-			return;
-		}
-		adr_word = eval_ar_expression(ArgStr[1], &ok);
-		if(!ok)
-			return;
-		WAsmCode[0] = EvalIntExpression(ArgStr[2], Int8, &ok) & 0xff;
-		if(!ok)
-			return;
-		CodeLen = 1;
-		WAsmCode[0] |= 0xc000 | (adr_word << 8);
-		return;
-	}
-
-	if(Memo("LRLK")) {
-		if(ArgCnt != 2) {
-			WrError(1110);
-			return;
-		}
-		adr_word = eval_ar_expression(ArgStr[1], &ok);
-		if(!ok)
-			return;
-		WAsmCode[1] = EvalIntExpression(ArgStr[2], Int16, &ok);
-		if(!ok)
-			return;
-		CodeLen = 2;
-		WAsmCode[0] = 0xd000 | (adr_word << 8);
-		return;
-	}
-
-	if(Memo("LDPK")) {
-		if(ArgCnt != 1) {
-			WrError(1110);
-			return;
-		}
-		WAsmCode[0] = ConstIntVal(ArgStr[1], Int16, &ok);
-		if(ok && (!(WAsmCode[0] & (~0x1ff)))) {  /* emulate Int9 */
-			CodeLen = 1;
-			WAsmCode[0] = (WAsmCode[0] & 0x1ff) | 0xc800;
-			return;
-		}
-		WAsmCode[0] = EvalIntExpression(ArgStr[1], Int16, &ok);
-		if(!ok)
-			return;
-		ChkSpace(SegData);
-		CodeLen = 1;
-		WAsmCode[0] = ((WAsmCode[0] >> 7) & 0x1ff) | 0xc800;
-		return;
-	}
-
-	if(Memo("NORM")) {
-		if((ArgCnt != 1)) {
-			WrError(1110);
-			return;
-		}
-		decode_adr(ArgStr[1], 2, False);
-		if(!adr_ok)
-			return;
-		if(adr_mode < 0x80) {
-			WrError(1350);
-			return;
-		}
-		CodeLen = 1;
-		WAsmCode[0] = 0xce82 | (adr_mode & 0x70);
-		return;
-	}
-
-	WrXError(1200, OpPart);
-}
-
-/* ---------------------------------------------------------------------- */
-
-static Boolean is_def_3202x(void)
-{
-	static const char *defs[] = { "BSS", "PORT", "STRING", "RSTRING", 
-					      "BYTE", "WORD", "LONG", "FLOAT",
-					      "DOUBLE", "EFLOAT", "BFLOAT", 
-					      "TFLOAT", NULL }; 
-	const char **cp = defs;
-
-	while(*cp) {
-		if (Memo(*cp))
-			return True;
-		cp++;
-	}
-	return False;
-}
-
-/* ---------------------------------------------------------------------- */
-
-static void switch_from_3202x(void)
-{
-	deinitfields();
-}
-
-/* ---------------------------------------------------------------------- */
-
-static void switch_to_3202x(void)
-{
-	TurnWords = False; 
-	ConstMode = ConstModeIntel; 
-	SetIsOccupied = False;
-	
-	PCSymbol = "$";
-	HeaderID = 0x75; 
-	NOPCode = 0x5500;
-	DivideChars = ",";
-	HasAttrs = False;
-	
-	ValidSegs = (1 << SegCode) | (1 << SegData) | (1 << SegIO);
-	Grans[SegCode] = 2; ListGrans[SegCode] = 2; SegInits[SegCode] = 0;
+  TurnWords = False; 
+  ConstMode = ConstModeIntel; 
+  
+  PCSymbol = "$";
+  HeaderID = 0x75; 
+  NOPCode = 0x5500;
+  DivideChars = ",";
+  HasAttrs = False;
+  
+  ValidSegs = (1 << SegCode) | (1 << SegData) | (1 << SegIO);
+  Grans[SegCode] = 2; ListGrans[SegCode] = 2; SegInits[SegCode] = 0;
         SegLimits[SegCode] = 0xffff;
-	Grans[SegData] = 2; ListGrans[SegData] = 2; SegInits[SegData] = 0;
+  Grans[SegData] = 2; ListGrans[SegData] = 2; SegInits[SegData] = 0;
         SegLimits[SegData] = 0xffff;
-	Grans[SegIO  ] = 2; ListGrans[SegIO  ] = 2; SegInits[SegIO  ] = 0;
+  Grans[SegIO  ] = 2; ListGrans[SegIO  ] = 2; SegInits[SegIO  ] = 0;
         SegLimits[SegIO  ] = 0xf;
-	
-	MakeCode = make_code_3202x; 
-	IsDef = is_def_3202x; SwitchFrom = switch_from_3202x;
-	initfields();
+  
+  MakeCode = MakeCode_3202x; 
+  IsDef = IsDef_3202x; SwitchFrom = SwitchFrom_3202x;
+  InitFields();
 }
 
 /* ---------------------------------------------------------------------- */
 
 void code3202x_init(void)
 {
-	cpu_32025 = AddCPU("320C25", switch_to_3202x);
-	cpu_32026 = AddCPU("320C26", switch_to_3202x);
-	cpu_32028 = AddCPU("320C28", switch_to_3202x);
-	
-	AddCopyright("TMS320C2x-Generator (C) 1994/96 Thomas Sailer");
+  CPU32025 = AddCPU("320C25", SwitchTo_3202x);
+  CPU32026 = AddCPU("320C26", SwitchTo_3202x);
+  CPU32028 = AddCPU("320C28", SwitchTo_3202x);
+  
+  AddCopyright("TMS320C2x-Generator (C) 1994/96 Thomas Sailer");
 }

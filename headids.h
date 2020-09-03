@@ -1,5 +1,9 @@
+#ifndef _HEADIDS_H
+#define _HEADIDS_H
 /* headids.h */
 /*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
 /* Makroassembler AS                                                         */
 /*                                                                           */
 /* Hier sind alle Prozessor-IDs mit ihren Eigenschaften gesammelt            */
@@ -10,19 +14,31 @@
 
 /* Hex-Formate */
 
-typedef enum {Default,MotoS,
-              IntHex,IntHex16,IntHex32,
-              MOSHex,TekHex,TiDSK,Atmel} THexFormat;
+typedef enum
+{
+  eHexFormatDefault,
+  eHexFormatMotoS,
+  eHexFormatIntel,
+  eHexFormatIntel16,
+  eHexFormatIntel32,
+  eHexFormatMOS,
+  eHexFormatTek,
+  eHexFormatTiDSK,
+  eHexFormatAtmel,
+  eHexFormatMico8,
+  eHexFormatC
+} tHexFormat;
 
 typedef struct
-         {
-          char *Name;
-          Word Id;
-          THexFormat HexFormat;
-         } TFamilyDescr,*PFamilyDescr;
+{
+  const char *Name;
+  Word Id;
+  tHexFormat HexFormat;
+} TFamilyDescr, *PFamilyDescr;
 
-extern PFamilyDescr FindFamilyByName(char *Name);
+extern PFamilyDescr FindFamilyByName(const char *Name);
 
 extern PFamilyDescr FindFamilyById(Word Id);
 
 extern void headids_init(void);
+#endif /* _HEADIDS_H */

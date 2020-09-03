@@ -1,5 +1,9 @@
+#ifndef _STDINC_H
+#define _STDINC_H
 /* stdinc.h */
 /*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
 /* AS-Portierung                                                             */
 /*                                                                           */
 /* globaler Einzug immer benoetigter includes                                */
@@ -8,6 +12,16 @@
 /*           11. 5.1997 DOS-Anpassungen                                      */
 /*                                                                           */
 /*****************************************************************************/
+/* $Id: stdinc.h,v 1.1 2003/11/06 02:49:24 alfred Exp $                     */
+/***************************************************************************** 
+ * $Log: stdinc.h,v $
+ * Revision 1.1  2003/11/06 02:49:24  alfred
+ * - recreated
+ *
+ * Revision 1.2  2003/05/03 10:28:30  alfred
+ * - no malloc.h for OSX
+ *
+ *****************************************************************************/
 
 #include <stdio.h>
 #ifndef __MUNIX__
@@ -23,7 +37,7 @@
 #include <alloc.h>
 #else
 #include <memory.h>
-#ifndef __FreeBSD__
+#if !defined (__FreeBSD__) && !defined(__APPLE__)
 #include <malloc.h>
 #endif
 #endif
@@ -43,3 +57,4 @@
 #define M_PI 3.1415926535897932385E0
 #endif
 
+#endif /* _STDINC_H */

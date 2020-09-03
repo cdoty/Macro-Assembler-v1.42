@@ -1,5 +1,9 @@
+#ifndef _CODEFMC8_H
+#define _CODEFMC8_H
 /* codefmc8.h */
 /*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
 /* AS, C-Version                                                             */
 /*                                                                           */
 /* Codegenerator fuer Fujitsu-F2MC8-Prozessoren                              */
@@ -9,3 +13,4 @@
 /*****************************************************************************/
 
 extern void codef2mc8_init(void);
+#endif /* _CODEFMC8_H */

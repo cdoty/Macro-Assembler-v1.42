@@ -1,112 +1,80 @@
+#ifndef _ASMDEF_H
+#define _ASMDEF_H
 /* asmdef.h */
 /*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
 /* AS-Portierung                                                             */
 /*                                                                           */
 /* global benutzte Variablen und Definitionen                                */
 /*                                                                           */
-/* Historie:  4. 5.1996 Grundsteinlegung                                     */
-/*           24. 6.1998 Zeichenübersetzungstabellen                          */
-/*           24. 7.1998 Debug-Modus NoICE                                    */
-/*           25. 7.1998 PassNo --> Integer                                   */
-/*           17. 8.1998 InMacroFlag hierher verschoben                       */
-/*           18. 8.1998 RadixBase hinzugenommen                              */
-/*                      ArgStr-Feld war eins zu kurz                         */
-/*           19. 8.1998 BranchExt-Variablen                                  */
-/*           29. 8.1998 ActListGran hinzugenommen                            */
-/*            1. 1.1999 SegLimits dazugenommen                               */
-/*                      SegInits --> LargeInt                                */
-/*            9. 1.1999 ChkPC jetzt mit Adresse als Parameter                */
-/*           17. 4.1999 DefCPU hinzugenommen                                 */
-/*           30. 5.1999 OutRadixBase hinzugenommen                           */
-/*           10. 7.1999 Symbolrecord hierher verschoben                      */
-/*           22. 9.1999 RelocEntry definiert                                 */
-/*            5.11.1999 ExtendErrors von Boolean nach ShortInt               */
-/*                                                                           */
 /*****************************************************************************/
 
+#include <stdio.h>
+
 #include "chunks.h"
-
 #include "fileformat.h"
+#include "dynstring.h"
+#include "strcomp.h"
+#include "lstmacroexp.h"
+#include "cpulist.h"
+#include "tempresult.h"
 
-typedef Byte CPUVar;
-
-typedef struct _TCPUDef
-         {
-	  struct _TCPUDef *Next;
-	  char *Name;
-	  CPUVar Number,Orig;
-	  void (*SwitchProc)(
-#ifdef __PROTOS__
-                             void
-#endif
-                            );
-	 } TCPUDef,*PCPUDef;
-
-typedef enum {TempInt,TempFloat,TempString,TempNone} TempType;
-
-typedef struct _RelocEntry
-         {
-          struct _RelocEntry *Next;
-          char *Ref;
-          Byte Add;
-         } TRelocEntry, *PRelocEntry;
+struct sRelocEntry;
 
 typedef struct
-         {
-          TempType Typ;
-          PRelocEntry Relocs;
-          union
-           {
-            LargeInt Int;
-            Double Float;
-            String Ascii;
-           } Contents;
-         } TempResult;
-
-typedef struct
-         {
-          TempType Typ;
-          TRelocEntry *Relocs;
-          union
-           {
-            LargeInt IWert;
-            Double FWert;
-            char *SWert;
-           } Contents;
-         } SymbolVal;
+{
+  TempType Typ;
+  struct sRelocEntry *Relocs;
+  union
+  {
+    LargeInt IWert;
+    Double FWert;
+    struct
+    {
+      char *Contents;
+      unsigned Length;
+    } String;
+  } Contents;
+} SymbolVal;
 
 typedef struct _TCrossRef
-         {
-          struct _TCrossRef *Next;
-          Byte FileNum;
-          LongInt LineNum;
-          Integer OccNum;
-         } TCrossRef,*PCrossRef;
+{
+  struct _TCrossRef *Next;
+  Byte FileNum;
+  LongInt LineNum;
+  Integer OccNum;
+} TCrossRef,*PCrossRef;
 
-typedef struct _SymbolEntry
-         {
-          struct _SymbolEntry *Left,*Right;
-          ShortInt Balance;
-          LongInt Attribute;
-          char *SymName;
-          Byte SymType;
-          ShortInt SymSize;
-          Boolean Defined,Used,Changeable;
-          SymbolVal SymWert;
-          PCrossRef RefList;
-          Byte FileNum;
-          LongInt LineNum;
-          TRelocEntry *Relocs;
-         } SymbolEntry,*SymbolPtr;
 
 typedef struct _TPatchEntry
-        {
-          struct _TPatchEntry *Next;
-          LargeWord Address;
-          Byte *RelocType;
-        } TPatchEntry, *PPatchEntry;
+{
+  struct _TPatchEntry *Next;
+  LargeWord Address;
+  char *Ref;
+  Word len;
+  LongWord RelocType;
+} TPatchEntry, *PPatchEntry;
 
-typedef enum {DebugNone,DebugMAP,DebugAOUT,DebugCOFF,DebugELF,DebugAtmel,DebugNoICE} DebugType;
+typedef struct _TExportEntry
+{
+  struct _TExportEntry *Next;
+  char *Name;
+  Word len;
+  LongWord Flags;
+  LargeWord Value;
+} TExportEntry, *PExportEntry;
+
+typedef enum
+{
+  DebugNone,
+  DebugMAP,
+  DebugAOUT,
+  DebugCOFF,
+  DebugELF,
+  DebugAtmel,
+  DebugNoICE
+} DebugType;
 
 #define Char_NUL 0
 #define Char_BEL '\a'
@@ -117,23 +85,27 @@ typedef enum {DebugNone,DebugMAP,DebugAOUT,DebugCOFF,DebugELF,DebugAtmel,DebugNo
 #define Char_CR 13
 #define Char_ESC 27
 
-#ifdef HAS64
-#define MaxLargeInt 0x7fffffffffffffffll
-#else
-#define MaxLargeInt 0x7fffffffl
-#endif
+#define ListMask_FormFeed         (1 << 0)
+#define ListMask_SymbolList       (1 << 1)
+#define ListMask_MacroList        (1 << 2)
+#define ListMask_FunctionList     (1 << 3)
+#define ListMask_LineNums         (1 << 4)
+#define ListMask_DefineList       (1 << 5)
+#define ListMask_RegDefList       (1 << 6)
+#define ListMask_Codepages        (1 << 7)
+#define ListMask_StructList       (1 << 8)
 
 extern char SrcSuffix[],IncSuffix[],PrgSuffix[],LstSuffix[],
             MacSuffix[],PreSuffix[],LogSuffix[],MapSuffix[],
             OBJSuffix[];
-            
+
 #define MomCPUName       "MOMCPU"     /* mom. Prozessortyp */
 #define MomCPUIdentName  "MOMCPUNAME" /* mom. Prozessortyp */
 #define SupAllowedName   "INSUPMODE"  /* privilegierte Befehle erlaubt */
 #define DoPaddingName    "PADDING"    /* Padding an */
+#define PackingName      "PACKING"    /* gepackte Ablage an */
 #define MaximumName      "INMAXMODE"  /* CPU im Maximum-Modus */
 #define FPUAvailName     "HASFPU"     /* FPU-Befehle erlaubt */
-#define LstMacroExName   "MACEXP"     /* expandierte Makros anzeigen */
 #define ListOnName       "LISTON"     /* Listing an/aus */
 #define RelaxedName      "RELAXED"    /* alle Zahlenschreibweisen zugelassen */
 #define SrcModeName      "INSRCMODE"  /* CPU im Quellcode-kompatiblen Modus */
@@ -149,26 +121,34 @@ extern char SrcSuffix[],IncSuffix[],PrgSuffix[],LstSuffix[],
 #define Has64Name        "HAS64"         /* arbeitet Parser mit 64-Bit-Integers ? */
 #define ArchName         "ARCHITECTURE"  /* Zielarchitektur von AS */
 #define AttrName         "ATTRIBUTE"  /* Attributansprache in Makros */
+#define LabelName        "__LABEL__"  /* Labelansprache in Makros */
+#define ArgCName         "ARGCOUNT"   /* Argumentzahlansprache in Makros */
+#define AllArgName       "ALLARGS"    /* Ansprache Argumentliste in Makros */
 #define DefStackName     "DEFSTACK"   /* Default-Stack */
+#define NestMaxName      "NESTMAX"    /* max. nesting level of a macro */
+#define DottedStructsName "DOTTEDSTRUCTS" /* struct elements by default with . */
 
-extern char *EnvName;
+extern const char *EnvName;
 
-#define ParMax 20
+/* This results from the tokenized representation of macro arguments
+   in macro bodys: (31*16) - 4 for special arguments: */
+
+#define ArgCntMax 476
 
 #define ChapMax 4
 
-#define StructSeg (PCMax+1)
+#define StructSeg (PCMax + 1)
 
-extern char *SegNames[PCMax+1];
-extern char SegShorts[PCMax+1];
-
-extern LongInt Magic;
+extern const char *SegNames[PCMax + 2];
+extern char SegShorts[PCMax + 2];
 
 #define AscOfs '0'
 
-#define MaxCodeLen 1024
+#define MaxCodeLen_Ini 256
+#define MaxCodeLen_Max 65535
+extern LongWord MaxCodeLen;
 
-extern char *InfoMessCopyright;
+#define DEF_NESTMAX 256
 
 typedef void (*SimpProc)(
 #ifdef __PROTOS__
@@ -176,91 +156,107 @@ void
 #endif
 );
 
+typedef void (*DissectBitProc)(
+#ifdef __PROTOS__
+char *pDest, int DestSize, LargeWord Inp
+#endif
+);
+
+
 typedef Word WordField[6];          /* fuer Zahlenumwandlung */
-typedef char *ArgStrField[ParMax+1];/* Feld mit Befehlsparametern */
-typedef char *StringPtr;
-
-typedef enum {ConstModeIntel,	    /* Hex xxxxh, Okt xxxxo, Bin xxxxb */
-	       ConstModeMoto,	    /* Hex $xxxx, Okt @xxxx, Bin %xxxx */
-	       ConstModeC}          /* Hex 0x..., Okt 0...., Bin ----- */
-             TConstMode;
-
-typedef struct _TFunction
-         {
-	  struct _TFunction *Next;
-	  Byte ArguCnt;
-          StringPtr Name,Definition;
-	 } TFunction,*PFunction;
+typedef enum
+{
+  ConstModeIntel,     /* Hex xxxxh, Oct xxxxo, Bin xxxxb */
+  ConstModeMoto,      /* Hex $xxxx, Oct @xxxx, Bin %xxxx */
+  ConstModeC,         /* Hex 0x..., Oct 0...., Bin ----- */
+  ConstModeWeird      /* Hex [xh]'xxxx', Oct o'xxxx', Bin b'xxxx' */
+} TConstMode;
 
 typedef struct _TTransTable
-         {
-          struct _TTransTable *Next;
-          char *Name;
-          unsigned char *Table;
-         } TTransTable,*PTransTable;
+{
+  struct _TTransTable *Next;
+  char *Name;
+  unsigned char *Table;
+} TTransTable, *PTransTable;
 
 typedef struct _TSaveState
-	 {
-	  struct _TSaveState *Next;
-	  CPUVar SaveCPU;
-	  Integer SavePC;
-	  Byte SaveListOn;
-	  Boolean SaveLstMacroEx;
-	  PTransTable SaveTransTable;
-	 } TSaveState,*PSaveState;
+{
+  struct _TSaveState *Next;
+  CPUVar SaveCPU;
+  char *pSaveCPUArgs;
+  Integer SavePC;
+  Byte SaveListOn;
+  tLstMacroExp SaveLstMacroExp;
+  tLstMacroExpMod SaveLstMacroExpModDefault,
+                  SaveLstMacroExpModOverride;
+  PTransTable SaveTransTable;
+  Integer SaveEnumSegment;
+  LongInt SaveEnumCurrentValue, SaveEnumIncrement;
+} TSaveState,*PSaveState;
 
 typedef struct _TForwardSymbol
-         {
-	  struct _TForwardSymbol *Next;
-          StringPtr Name;
-	  LongInt DestSection;
-	 } TForwardSymbol,*PForwardSymbol;
+{
+  struct _TForwardSymbol *Next;
+  StringPtr Name;
+  LongInt DestSection;
+  StringPtr pErrorPos;
+} TForwardSymbol, *PForwardSymbol;
 
 typedef struct _TSaveSection
-         {
-	  struct _TSaveSection *Next;
-          PForwardSymbol LocSyms,GlobSyms,ExportSyms;
-	  LongInt Handle;
-	 } TSaveSection,*PSaveSection;
+{
+  struct _TSaveSection *Next;
+  PForwardSymbol LocSyms, GlobSyms, ExportSyms;
+  LongInt Handle;
+} TSaveSection, *PSaveSection;
+
+typedef struct sSavePhase
+{
+  struct sSavePhase *pNext;
+  LargeWord SaveValue;
+} tSavePhase;
 
 typedef struct _TDefinement
-         {
- 	  struct _TDefinement *Next;
-          StringPtr TransFrom,TransTo;
-          Byte Compiled[256];
-	 } TDefinement,*PDefinement;
+{
+  struct _TDefinement *Next;
+  StringPtr TransFrom, TransTo;
+  Byte Compiled[256];
+} TDefinement, *PDefinement;
 
-typedef struct _TStructure
-         {
-          struct _TStructure *Next;
-          Boolean DoExt;
-          char *Name;
-          LargeWord CurrPC;
-         } TStructure,*PStructure;
+typedef struct _ASSUMERec
+{
+  const char *Name;
+  LongInt *Dest;
+  LongInt Min,Max;
+  LongInt NothingVal;
+  void (*pPostProc)(void);
+} ASSUMERec;
 
 extern StringPtr SourceFile;
 
 extern StringPtr ClrEol;
 extern StringPtr CursUp;
 
-extern LargeWord PCs[StructSeg+1];
+extern LargeWord *PCs;
+extern Boolean RelSegs;
 extern LargeWord StartAdr;
+extern LargeWord AfterBSRAddr;
 extern Boolean StartAdrPresent;
-extern LargeWord Phases[StructSeg+1];
+extern LargeWord *Phases;
 extern Word Grans[StructSeg+1];
 extern Word ListGrans[StructSeg+1];
 extern ChunkList SegChunks[StructSeg+1];
 extern Integer ActPC;
 extern Boolean PCsUsed[StructSeg+1];
-extern LargeInt SegInits[PCMax+1]; 
-extern LargeInt SegLimits[PCMax+1]; 
+extern LargeWord *SegInits;
+extern LargeWord *SegLimits;
 extern LongInt ValidSegs;
 extern Boolean ENDOccured;
 extern Boolean Retracted;
 extern Boolean ListToStdout,ListToNull;
 
-extern Word TypeFlag;
-extern ShortInt SizeFlag;
+extern unsigned ASSUMERecCnt;
+extern const ASSUMERec *pASSUMERecs;
+extern void (*pASSUMEOverride)(void);
 
 extern Integer PassNo;
 extern Integer JmpErrors;
@@ -269,6 +265,7 @@ extern Boolean Repass;
 extern Byte MaxSymPass;
 extern Byte ShareMode;
 extern DebugType DebugMode;
+extern Word NoICEMask;
 extern Byte ListMode;
 extern Byte ListOn;
 extern Boolean MakeUseList;
@@ -276,12 +273,18 @@ extern Boolean MakeCrossList;
 extern Boolean MakeSectionList;
 extern Boolean MakeIncludeList;
 extern Boolean RelaxedMode;
-extern Byte ListMask;
+extern Word ListMask;
 extern ShortInt ExtendErrors;
+extern Integer EnumSegment;
+extern LongInt EnumIncrement, EnumCurrentValue;
+extern LongWord MaxErrors;
+extern Boolean TreatWarningsAsErrors;
 
 extern LongInt MomSectionHandle;
 extern PSaveSection SectionStack;
+extern tSavePhase *pPhaseStacks[PCMax];
 
+extern tSymbolSize AttrPartOpSize;
 extern LongInt CodeLen;
 extern Byte *BAsmCode;
 extern Word *WAsmCode;
@@ -296,18 +299,19 @@ extern Boolean MacProOutput;
 extern Boolean MacroOutput;
 extern Boolean QuietMode;
 extern Boolean HardRanges;
-extern char *DivideChars;
+extern const char *DivideChars;
 extern Boolean HasAttrs;
-extern char *AttrChars;
+extern const char *AttrChars;
 extern Boolean MsgIfRepass;
 extern Integer PassNoForMessage;
 extern Boolean CaseSensitive;
+extern LongInt NestMax;
+extern Boolean GNUErrors;
 
 extern FILE *PrgFile;
 
 extern StringPtr ErrorPath,ErrorName;
 extern StringPtr OutName;
-extern Boolean IsErrorOpen;
 extern StringPtr CurrFileName;
 extern LongInt CurrLine;
 extern LongInt MomLineCounter;
@@ -317,16 +321,17 @@ extern LongInt MacLineSum;
 extern LongInt NOPCode;
 extern Boolean TurnWords;
 extern Byte HeaderID;
-extern char *PCSymbol;
+extern const char *PCSymbol;
 extern TConstMode ConstMode;
-extern Boolean SetIsOccupied;
+extern Boolean (*SetIsOccupiedFnc)(void);
+extern Boolean SwitchIsOccupied, PageIsOccupied;
+extern Boolean (*DecodeAttrPart)(void);
 extern void (*MakeCode)(void);
 extern Boolean (*ChkPC)(LargeWord Addr);
 extern Boolean (*IsDef)(void);
 extern void (*SwitchFrom)(void);
 extern void (*InternSymbol)(char *Asc, TempResult *Erg);
-extern void (*InitPassProc)(void);
-extern void (*ClearUpProc)(void);
+extern DissectBitProc DissectBit;
 
 extern StringPtr IncludeList;
 extern Integer IncDepth,NextIncDepth;
@@ -336,65 +341,79 @@ extern FILE *ShareFile;
 extern FILE *MacProFile;
 extern FILE *MacroFile;
 extern Boolean InMacroFlag;
-extern StringPtr LstName,MacroName,MacProName;
-extern Boolean DoLst,NextDoLst;
+extern StringPtr LstName, MacroName, MacProName;
+extern tLstMacroExp DoLst, NextDoLst;
 extern StringPtr ShareName;
-extern CPUVar MomCPU,MomVirtCPU;
+extern CPUVar MomCPU, MomVirtCPU;
+extern StringPtr MomCPUArgs;
 extern char DefCPU[20];
-extern char MomCPUIdent[10];
-extern PCPUDef FirstCPUDef;
-extern CPUVar CPUCnt;
+extern char MomCPUIdent[20];
 
 extern Boolean FPUAvail;
 extern Boolean DoPadding;
+extern Boolean Packing;
 extern Boolean SupAllowed;
 extern Boolean Maximum;
 extern Boolean DoBranchExt;
 
-extern LargeWord RadixBase, OutRadixBase;
+extern int RadixBase, OutRadixBase, ListRadixBase;
 
-extern StringPtr LabPart,OpPart,AttrPart,ArgPart,CommPart,LOpPart;
+extern tStrComp *ArgStr;
+extern StringPtr pLOpPart;
+extern tStrComp LabPart, CommPart, ArgPart, OpPart, AttrPart;
 extern char AttrSplit;
-extern ArgStrField ArgStr;
-extern Byte ArgCnt;
+extern int ArgCnt;
 extern StringPtr OneLine;
+#ifdef PROFILE_MEMO
+extern unsigned NumMemo;
+extern unsigned long NumMemoSum, NumMemoCnt;
+#endif
+
+#define forallargs(pArg, cond) \
+        for (pArg = ArgStr + 1; (cond) && (pArg <= ArgStr + ArgCnt); pArg++)
 
 extern Byte LstCounter;
 extern Word PageCounter[ChapMax+1];
 extern Byte ChapDepth;
 extern StringPtr ListLine;
-extern Byte PageLength,PageWidth;
-extern Boolean LstMacroEx;
+extern Byte PageLength, PageWidth;
+extern tLstMacroExpMod LstMacroExpModOverride, LstMacroExpModDefault;
+extern Boolean DottedStructs;
 extern StringPtr PrtInitString;
 extern StringPtr PrtExitString;
 extern StringPtr PrtTitleString;
-extern StringPtr ExtendError;
 
 extern Byte StopfZahl;
 
 extern Boolean SuppWarns;
 
 #define CharTransTable CurrTransTable->Table
-extern PTransTable TransTables,CurrTransTable;
-
-extern PFunction FirstFunction;
+extern PTransTable TransTables, CurrTransTable;
 
 extern PDefinement FirstDefine;
-
-extern PStructure StructureStack;
-extern int StructSaveSeg;
 
 extern PSaveState FirstSaveState;
 
 extern Boolean MakeDebug;
 extern FILE *Debug;
 
+extern Boolean WasIF, WasMACRO;
 
 extern void AsmDefInit(void);
 
 extern void NullProc(void);
 
+extern int SetMaxCodeLen(LongWord NewMaxCodeLen);
+
 extern void Default_InternSymbol(char *Asc, TempResult *Erg);
+
+extern void Default_DissectBit(char *pDest, int DestSize, LargeWord BitSpec);
+
+extern void IncArgCnt(void);
+
+
+extern Boolean SetIsOccupied(void);
 
 
 extern void asmdef_init(void);
+#endif /* _ASMDEF_H */

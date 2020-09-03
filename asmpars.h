@@ -1,69 +1,128 @@
+#ifndef _ASMPARS_H
+#define _ASMPARS_H
 /* asmpars.h */
 /*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
 /* AS-Portierung                                                             */
 /*                                                                           */
 /* Verwaltung von Symbolen und das ganze Drumherum...                        */
 /*                                                                           */
-/* Historie:  5. 5.1996 Grundsteinlegung                                     */
-/*           26. 6.1998 Codepages                                            */
-/*           16. 8.1998 NoICE-Symbolausgabe                                  */
-/*            6.12.1998 UInt14                                               */
-/*           12. 7.1999 angefangen mit externen Symbolen                     */
-/*                                                                           */
 /*****************************************************************************/
 
-typedef enum {UInt1    ,
-              UInt2    ,
-              UInt3    ,
-              SInt4    ,UInt4    , Int4    ,
-              SInt5    ,UInt5    , Int5    ,
-              UInt6    ,
-              SInt7    ,UInt7    ,
-              SInt8    ,UInt8    , Int8    ,
-              UInt9    ,
-              UInt10   , Int10   ,
-              UInt11   ,
-              UInt12   , Int12   ,
-              UInt13   ,
-              UInt14   ,
-              UInt15   ,
-              SInt16   ,UInt16   , Int16   ,
-              UInt18   ,
-              SInt20   ,UInt20   , Int20   ,
-              UInt22   ,
-              SInt24   ,UInt24   , Int24   ,
-              SInt32   ,UInt32   , Int32   ,
+#include "symbolsize.h"
+#include "symflags.h"
+#include "tempresult.h"
+#include "lstmacroexp.h"
+
+typedef enum
+{
+  UInt1    ,
+  UInt2    ,
+  UInt3    ,
+  SInt4    , UInt4   , Int4    ,
+  SInt5    , UInt5   , Int5    ,
+  SInt6    , UInt6   ,
+  SInt7    , UInt7   ,
+  SInt8    , UInt8   , Int8    ,
+  SInt9    , UInt9    ,
+  UInt10   , Int10   ,
+  UInt11   ,
+  UInt12   , Int12   ,
+  UInt13   ,
+  UInt14   , Int14   ,
+  SInt15   , UInt15  ,
+  SInt16   , UInt16  , Int16   ,
+  UInt17   ,
+  UInt18   ,
+  UInt19   ,
+  SInt20   , UInt20  , Int20   ,
+  UInt21   ,
+  UInt22   ,
+  UInt23   ,
+  SInt24   , UInt24  , Int24   ,
+  SInt32   , UInt32  , Int32   ,
 #ifdef HAS64
-               Int64   ,
+  SInt64   , UInt64  , Int64   ,
 #endif
-               IntTypeCnt} IntType;
+  IntTypeCnt
+} IntType;
 
-typedef enum {Float32,Float64,Float80,FloatDec,FloatCo,FloatTypeCnt} FloatType;
+#ifdef __cplusplus
+# include "cppops.h"
+DefCPPOps_Enum(IntType)
+#endif
 
-extern LargeWord IntMasks[IntTypeCnt];
-extern LargeInt IntMins[IntTypeCnt];
-extern LargeInt IntMaxs[IntTypeCnt];
+#ifdef HAS64
+#define LargeWordType UInt64
+#else
+#define LargeWordType UInt32
+#endif
 
-extern Boolean FirstPassUnknown;
-extern Boolean SymbolQuestionable;
-extern Boolean UsesForwards;
+typedef struct
+{
+  Word SignAndWidth;
+  LargeWord Mask;
+  LargeInt Min, Max;
+} tIntTypeDef;
+
+typedef enum
+{
+  Float32,
+  Float64,
+  Float80,
+  FloatDec,
+  FloatCo,
+  FloatTypeCnt
+} FloatType;
+
+typedef struct _TFunction
+{
+  struct _TFunction *Next;
+  Byte ArguCnt;
+  StringPtr Name, Definition;
+} TFunction, *PFunction;
+
+typedef struct sEvalResult
+{
+  Boolean OK;
+  tSymbolFlags Flags;
+  unsigned AddrSpaceMask; /* Welche Adressraeume genutzt ? */
+  tSymbolSize DataSize;
+} tEvalResult;
+
+struct sStrComp;
+struct sRelocEntry;
+struct sSymbolEntry;
+
+extern tIntTypeDef IntTypeDefs[IntTypeCnt];
 extern LongInt MomLocHandle;
+extern LongInt TmpSymCounter,
+               FwdSymCounter,
+               BackSymCounter;
+extern char TmpSymCounterVal[10];
 extern LongInt LocHandleCnt;
-extern Boolean BalanceTree;
 extern LongInt MomLocHandle;
 
 
 extern void AsmParsInit(void);
 
+extern void InitTmpSymbols(void);
 
 extern Boolean SingleBit(LargeInt Inp, LargeInt *Erg);
 
 
-extern LargeInt ConstIntVal(char *Asc_O, IntType Typ, Boolean *Ok);
+extern IntType GetSmallestUIntType(LargeWord MaxValue);
 
-extern Double ConstFloatVal(char *Asc_O, FloatType Typ, Boolean *Ok);
 
-extern void ConstStringVal(char *Asc, char *Erg, Boolean *OK);
+struct sDynString;
+extern LargeInt DynString2Int(const struct sDynString *pDynString);
+
+extern Boolean Int2DynString(struct sDynString *pDynString, LargeInt Src);
+
+extern int TempResultToInt(TempResult *pResult);
+
+extern Boolean MultiCharToInt(TempResult *pResult, unsigned MaxLen);
 
 
 extern Boolean RangeCheck(LargeInt Wert, IntType Typ);
@@ -71,24 +130,30 @@ extern Boolean RangeCheck(LargeInt Wert, IntType Typ);
 extern Boolean FloatRangeCheck(Double Wert, FloatType Typ);
 
 
-extern Boolean IdentifySection(char *Name, LongInt *Erg);
+extern Boolean IdentifySection(const struct sStrComp *pName, LongInt *Erg);
 
 
-extern Boolean ExpandSymbol(char *Name);
+extern Boolean ExpandStrSymbol(char *pDest, unsigned DestSize, const struct sStrComp *pSrc);
 
-extern void EnterIntSymbol(char *Name_O, LargeInt Wert, Byte Typ, Boolean MayChange);
+extern void ChangeSymbol(struct sSymbolEntry *pEntry, LargeInt Value);
 
-extern void EnterExtSymbol(char *Name_O, LargeInt Wert, Byte Typ, Boolean MayChange);
+extern struct sSymbolEntry *EnterIntSymbolWithFlags(const struct sStrComp *pName, LargeInt Wert, Byte Typ, Boolean MayChange, tSymbolFlags Flags);
 
-extern void EnterFloatSymbol(char *Name_O, Double Wert, Boolean MayChange);
+#define EnterIntSymbol(pName, Wert, Typ, MayChange) EnterIntSymbolWithFlags(pName, Wert, Typ, MayChange, eSymbolFlag_None)
 
-extern void EnterStringSymbol(char *Name_O, char *Wert, Boolean MayChange);
+extern void EnterExtSymbol(const struct sStrComp *pName, LargeInt Wert, Byte Typ, Boolean MayChange);
 
-extern Boolean GetIntSymbol(char *Name, LargeInt *Wert);
+extern struct sSymbolEntry *EnterRelSymbol(const struct sStrComp *pName, LargeInt Wert, Byte Typ, Boolean MayChange);
 
-extern Boolean GetFloatSymbol(char *Name, Double *Wert);
+extern void EnterFloatSymbol(const struct sStrComp *pName, Double Wert, Boolean MayChange);
 
-extern Boolean GetStringSymbol(char *Name, char *Wert);
+extern void EnterStringSymbol(const struct sStrComp *pName, const char *pValue, Boolean MayChange);
+
+extern void EnterDynStringSymbolWithFlags(const struct sStrComp *pName, const tDynString *pValue, Boolean MayChange, tSymbolFlags Flags);
+
+#define EnterDynStringSymbol(pName, pValue, MayChange) EnterDynStringSymbolWithFlags(pName, pValue, MayChange, eSymbolFlag_None)
+
+extern void LookupSymbol(const struct sStrComp *pName, TempResult *pValue, Boolean WantRelocs, TempType ReqType);
 
 extern void PrintSymbolList(void);
 
@@ -105,41 +170,52 @@ extern void ResetSymbolDefines(void);
 extern void PrintSymbolDepth(void);
 
 
-extern void SetSymbolSize(char *Name, ShortInt Size);
-
-extern ShortInt GetSymbolSize(char *Name);
-
-extern Boolean IsSymbolFloat(char *Name);
-
-extern Boolean IsSymbolString(char *Name);
-
-extern Boolean IsSymbolDefined(char *Name);
-
-extern Boolean IsSymbolUsed(char *Name);
-
-extern Boolean IsSymbolChangeable(char *Name);
-
-extern Integer GetSymbolType(char *Name);
-
-extern void EvalExpression(char *Asc_O, TempResult *Erg);
-
-extern LargeInt EvalIntExpression(char *Asc, IntType Typ, Boolean *OK);
-
-extern Double EvalFloatExpression(char *Asc, FloatType Typ, Boolean *OK);
-
-extern void EvalStringExpression(char *Asc, Boolean *OK, char *Result);
+extern void EvalResultClear(tEvalResult *pResult);
 
 
-extern Boolean PushSymbol(char *SymName_O, char *StackName_O);
+extern void SetSymbolOrStructElemSize(const struct sStrComp *pName, tSymbolSize Size);
 
-extern Boolean PopSymbol(char *SymName_O, char *StackName_O);
+extern ShortInt GetSymbolSize(const struct sStrComp *pName);
+
+extern Boolean IsSymbolDefined(const struct sStrComp *pName);
+
+extern Boolean IsSymbolUsed(const struct sStrComp *pName);
+
+extern Boolean IsSymbolChangeable(const struct sStrComp *pName);
+
+extern Integer GetSymbolType(const struct sStrComp *pName);
+
+extern void EvalExpression(const char *pExpr, TempResult *Erg);
+
+extern void EvalStrExpression(const struct sStrComp *pExpr, TempResult *pErg);
+
+extern LargeInt EvalStrIntExpression(const struct sStrComp *pExpr, IntType Type, Boolean *pResult);
+extern LargeInt EvalStrIntExpressionWithFlags(const struct sStrComp *pExpr, IntType Type, Boolean *pResult, tSymbolFlags *pFlags);
+extern LargeInt EvalStrIntExpressionWithResult(const struct sStrComp *pExpr, IntType Type, struct sEvalResult *pResult);
+extern LargeInt EvalStrIntExpressionOffs(const struct sStrComp *pExpr, int Offset, IntType Type, Boolean *pResult);
+extern LargeInt EvalStrIntExpressionOffsWithFlags(const struct sStrComp *pExpr, int Offset, IntType Type, Boolean *pResult, tSymbolFlags *pFlags);
+extern LargeInt EvalStrIntExpressionOffsWithResult(const struct sStrComp *pExpr, int Offset, IntType Type, struct sEvalResult *pResult);
+
+extern Double EvalStrFloatExpressionWithResult(const struct sStrComp *pExpr, FloatType Typ, struct sEvalResult *pResult);
+extern Double EvalStrFloatExpression(const struct sStrComp *pExpr, FloatType Typ, Boolean *pResult);
+
+extern void EvalStrStringExpressionWithResult(const struct sStrComp *pExpr, struct sEvalResult *pResult, char *pEvalResult);
+extern void EvalStrStringExpression(const struct sStrComp *pExpr, Boolean *pResult, char *pEvalResult);
+
+
+extern const char *GetIntelSuffix(unsigned Radix);
+
+
+extern Boolean PushSymbol(const struct sStrComp *pSymName, const struct sStrComp *pStackName);
+
+extern Boolean PopSymbol(const struct sStrComp *pSymName, const struct sStrComp *pStackName);
 
 extern void ClearStacks(void);
  
 
-extern void EnterFunction(char *FName, char *FDefinition, Byte NewCnt);
+extern void EnterFunction(const struct sStrComp *pComp, char *FDefinition, Byte NewCnt);
 
-extern PFunction FindFunction(char *Name);
+extern PFunction FindFunction(const char *Name);
 
 extern void PrintFunctionList(void);
 
@@ -152,6 +228,7 @@ extern void RemoveDefSymbol(char *Name);
 
 extern void CopyDefSymbols(void);
 
+extern const TempResult *FindDefSymbol(const char *pName);
 
 extern void PrintCrossList(void);
 
@@ -160,11 +237,13 @@ extern void ClearCrossList(void);
 
 extern LongInt GetSectionHandle(char *SName_O, Boolean AddEmpt, LongInt Parent);
 
-extern char *GetSectionName(LongInt Handle);
+extern const char *GetSectionName(LongInt Handle);
 
 extern void SetMomSection(LongInt Handle);
 
 extern void AddSectionUsage(LongInt Start, LongInt Length);
+
+extern void ClearSectionUsage(void);
 
 extern void PrintSectionList(void);
 
@@ -173,8 +252,7 @@ extern void PrintDebSections(FILE *f);
 extern void ClearSectionList(void);
 
 
-extern void SetFlag(Boolean *Flag, char *Name, Boolean Wert);
-
+extern void SetFlag(Boolean *Flag, const char *Name, Boolean Wert);
 
 extern LongInt GetLocHandle(void);
 
@@ -185,9 +263,9 @@ extern void PopLocHandle(void);
 extern void ClearLocStack(void);
 
 
-extern void AddRegDef(char *Orig, char *Repl);
+extern void AddRegDef(const struct sStrComp *pOrigComp, const struct sStrComp *pReplComp);
 
-extern Boolean FindRegDef(char *Name, char **Erg);
+extern Boolean FindRegDef(const char *Name, char **Erg);
 
 extern void TossRegDefs(LongInt Sect);
 
@@ -205,3 +283,4 @@ extern void PrintCodepages(void);
 
 extern void asmpars_init(void);
 
+#endif /* _ASMPARS_H */

@@ -1,3 +1,17 @@
+#ifndef _DATATYPES_H
+#define _DATATYPES_H
+/* datatypes.h */
+/*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
+/* AS-Port                                                                   */
+/*                                                                           */
+/* define some handy types & constants                                       */
+/*                                                                           */
+/* History:  2001-10-13 /AArnold - created this comment                      */
+/*                                                                           */
+/*****************************************************************************/
+
 #include "sysdefs.h"
 
 typedef Card8 Byte;       /* Integertypen */
@@ -10,6 +24,7 @@ typedef Integ16 Integer;
 
 typedef Card32 LongWord;
 typedef Integ32 LongInt;
+#define PRILongInt PRIInteg32
 
 #ifdef HAS64
 typedef Card64 QuadWord;
@@ -36,8 +51,13 @@ typedef float Single;
 
 typedef Byte Boolean; 
 
-typedef char String[256];
-typedef char ShortString[65];
+#ifndef STRINGSIZE
+# define STRINGSIZE 256
+#endif
+#define SHORTSTRINGSIZE 65
+
+typedef char String[STRINGSIZE];
+typedef char ShortString[SHORTSTRINGSIZE];
 
 #ifndef TRUE
 #define TRUE 1
@@ -53,3 +73,4 @@ typedef char ShortString[65];
 #define False 0
 #endif
 
+#endif /* _DATATYPES_H */

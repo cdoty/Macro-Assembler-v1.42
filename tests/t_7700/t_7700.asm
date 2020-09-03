@@ -14,7 +14,7 @@ accmode macro   size
 	   clp    #$20
 	   assume m:0
 	  elsecase
-	   fatal  "accmode: ungÅltige Operandengrî·e: $\{SIZE}"
+	   fatal  "accmode: invalid operand size: $\{SIZE}"
 	 endcase
 	endm
 
@@ -27,7 +27,7 @@ idxmode macro	size
 	   clp    #$10
 	   assume x:0
 	  elsecase
-	   fatal  "idxmode: ungÅltige Operandengrî·e: $\{SIZE}"
+	   fatal  "idxmode: invalid operand size: $\{SIZE}"
 	 endcase
 	endm
 
@@ -101,6 +101,7 @@ targ:
 	org	*+$100
 	bra	targ
 	per	targ
+	per	#-30
 
 	accmode	8
 	idxmode	8
@@ -265,7 +266,7 @@ targ3:
 
 	cpu     65816
 
-	cop
+	cop	#0
 	jml     $2000
 	jsl     $4000
 	brl     *
@@ -353,4 +354,7 @@ targ3:
         divs     $12,s
         divs     ($12,s),y
 
-
+	; plain break (one byte)
+	brk
+	; break with extra NOP to compensate PC increment by 2 if not corrected by break handler
+	brk	$ea

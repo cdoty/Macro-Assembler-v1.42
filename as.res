@@ -4,24 +4,6 @@
 ;*                                                                           *
 ;* String-Definitionen fuer AS                                               *
 ;*                                                                           *
-;* Historie:  4. 5.1996 Grundsteinlegung                                     *
-;*           19. 1.1997 Kommandozeilenoption U                               *
-;*           21. 1.1997 Warnung nicht bitadressierbare Speicherstelle        *
-;*           22. 1.1997 Fehler;Warnungen fuer Stacks                         *
-;*            1. 2.1997 Warnung wegen NUL-Zeichen                            *
-;*           29. 3.1997 Kommandozeilenoption g                               *
-;*           30. 5.1997 Warnung wg. inkorrektem Listing                      *
-;*           12. 7.1997 Kommandozeilenoption Y                               *
-;*            5. 8.1997 Meldungen fuer Strukturen                            *
-;*            7. 9.1997 Warnung Bereichsueberschreitung                      *
-;*           24. 9.1997 Kopfzeile Registerdefinitionsliste                   *
-;*           19.10.1997 Warnung neg. DUP-Anzahl                              *
-;*           26. 6.1998 Fehlermeldung Codepage nicht gefunden                *
-;*           27. 6.1998 Meldungen für Codepage-Liste                         *
-;*           18. 4.1999 Kommandozeilenoptionen cpu, shareout                 *
-;*            2. 5.1999 'order' --> 'instruction'                            *
-;*           13. 7.1999 Fehlermeldungen fuer extern-Symbole                  *
-;*                                                                           *
 ;*****************************************************************************
 
 Include header.res
@@ -30,16 +12,24 @@ Include header.res
 ; Fehlermeldungen
 
 Message ErrName
- ": Fehler "
- ": error "
+ "Fehler"
+ "error"
 
 Message WarnName
- ": Warnung "
- ": warning "
+ "Warnung"
+ "warning"
 
 Message InLineName
  " in Zeile "
  " in line "
+
+Message GNUErrorMsg1
+ "In Datei included von"
+ "In file included from"
+
+Message GNUErrorMsgN
+ "                  von"
+ "                 from"
 
 Message ErrMsgUselessDisp
  "Displacement=0, &uuml;berfl&uuml;ssig"
@@ -157,6 +147,46 @@ Message ErrMsgNegDUP
  "negatives Argument f&uuml;r DUP"
  "negative argument for DUP"
 
+Message ErrMsgConvIndX
+ "einzelner X-Operand wird als indizierte und nicht als implizite Adressierung interpretiert"
+ "single X operand interpreted as indexed and not implicit addressing"
+
+Message ErrMsgNullResMem
+ "kein Speicher reserviert, sind Sie sicher, da&szlig; Sie das wollten?"
+ "no memory reserved, are you sure you wanted that?"
+
+Message ErrMsgBitNumberTruncated
+ "Bit-Nummer wird abgeschnitten werden"
+ "bit number will be truncated"
+
+Message ErrMsgInvRegisterPointer
+ "Ung&uuml;ltiger Wert f&uuml;r Registerzeiger"
+ "invalid register pointer value"
+
+Message ErrMsgMacArgRedef
+ "Makro-Argument umdefiniert"
+ "macro argument redefined"
+
+Message ErrMsgDeprecated
+ "veraltete Anweisung"
+ "deprecated instruction"
+
+Message ErrMsgDeprecated_Instead
+ "%s benutzen"
+ "use %s"
+
+Message ErrMsgSrcLEThanDest
+ "Quelloperand l&auml;nger oder gleich Zieloperand"
+ "source operand is longer or same size as destination operand"
+
+Message ErrMsgTrapValidInstruction
+ "TRAP-Nummer ist g&uuml;ltige Instruktion"
+ "TRAP number represents valid instruction"
+
+Message ErrMsgPaddingAdded
+ "Padding hinzugef&uuml;gt"
+ "Padding added"
+
 ;*****
 
 Message ErrMsgDoubleDef
@@ -199,7 +229,7 @@ Message ErrMsgOnlyImmAddr
  "nur immediate-Adressierung erlaubt"
  "addressing mode must be immediate"
 
-Message ErrMsgInvOpsize
+Message ErrMsgInvOpSize
  "unpassende Operandengr&ouml;&szlig;e"
  "invalid operand size"
 
@@ -211,17 +241,53 @@ Message ErrMsgUndefOpSizes
  "undefinierte Operandengr&ouml;&szlig;e"
  "undefined operand size"
 
-Message ErrMsgInvOpType
- "unpassender Operandentyp"
- "invalid operand type"
+Message ErrMsgStringOrIntButFloat
+ "Ganzzahl oder String erwartet, aber Gleitkommazahl erhalten"
+ "expected integer or string, but got floating point number"
 
-Message ErrMsgTooMuchArgs
- "zuviele Argumente"
+Message ErrMsgIntButFloat
+ "Ganzzahl erwartet, aber Gleitkommazahl erhalten"
+ "expected integer, but got floating point number"
+
+Message ErrMsgFloatButString
+ "Gleitkommazahl erwartet, aber String erhalten"
+ "expected floating point number, but got string"
+
+Message ErrMsgOpTypeMismatch
+ "Operandentyp-Diskrepanz"
+ "operand type mismatch"
+
+Message ErrMsgStringButInt
+ "String erwartet, aber Ganzzahl erhalten"
+ "expected string, but got integer"
+
+Message ErrMsgStringButFloat
+ "String erwartet, aber Gleitkommazahl erhalten"
+ "expected string, but got floating point number"
+
+Message ErrMsgTooManyArgs
+ "zu viele Argumente"
  "too many arguments"
 
-Message ErrMsgUnknownOpcode
+Message ErrMsgIntButString
+ "Ganzzahl erwartet, aber String erhalten"
+ "expected integer, but got string"
+
+Message ErrMsgIntOrFloatButString
+ "Ganz- oder Gleitkommazahl erwartet, aber String erhalten"
+ "expected integer or floating point number, but got string"
+
+Message ErrMsgExpectString
+ "String erwartet"
+ "expected string"
+
+Message ErrMsgExpectInt
+ "Ganzzahl erwartet"
+ "expected integer"
+
+Message ErrMsgUnknownInstruction
  "unbekannter Befehl"
- "unknown opcode"
+ "unknown instruction"
 
 Message ErrMsgBrackErr
  "Klammerfehler"
@@ -238,6 +304,10 @@ Message ErrMsgUnderRange
 Message ErrMsgOverRange
  "Bereichs&uuml;berschreitung"
  "range overflow"
+
+Message ErrMsgNotPwr2
+ "keine Zweierpotenz"
+ "not a power of two"
 
 Message ErrMsgNotAligned
  "Adresse nicht ausgerichtet"
@@ -259,9 +329,13 @@ Message ErrMsgInvAddrMode
  "unerlaubter Adressierungsmodus"
  "addressing mode not allowed here"
 
-Message ErrMsgMustBeEven
- "Nummer mu&szlig; ausgerichtet sein"
- "number must be aligned"
+Message ErrMsgAddrMustBeEven
+ "Addresse mu&szlig; gerade sein"
+ "address must be even"
+
+Message ErrMsgAddrMustBeAligned
+ "Addresse mu&szlig; ausgerichtet sein"
+ "address must be aligned"
 
 Message ErrMsgInvParAddrMode
  "Adressierungsmodus im Parallelbetrieb nicht erlaubt"
@@ -270,6 +344,10 @@ Message ErrMsgInvParAddrMode
 Message ErrMsgUndefCond
  "undefinierte Bedingung"
  "undefined condition"
+
+Message ErrMsgIncompCond
+ "inkompatible Bedingungen"
+ "incompatible conditions"
 
 Message ErrMsgJmpDistTooBig
  "Sprungdistanz zu gro&szlig;"
@@ -282,6 +360,10 @@ Message ErrMsgDistIsOdd
 Message ErrMsgInvShiftArg
  "ung&uuml;ltiges Schiebeargument"
  "invalid argument for shifting"
+
+Message ErrMsgOnly1
+ "nur Eins als Argument erlaubt"
+ "operand must be one"
 
 Message ErrMsgRange18
  "nur Bereich 1..8 erlaubt"
@@ -310,6 +392,18 @@ Message ErrMsgInvCtrlReg
 Message ErrMsgInvReg
  "ung&uuml;ltiges Register"
  "invalid register"
+
+Message ErrMsgDoubleReg
+ "Register mehr als einmal gelistet"
+ "register(s) listed more than once"
+
+Message ErrMsgRegBankMismatch
+ "Register-Bank-Diskrepanz"
+ "register bank mismatch"
+
+Message ErrMsgUndefRegSize
+ "Registerl&auml;nge undefiniert"
+ "undefined register length"
 
 Message ErrMsgNoSaveFrame
  "RESTORE ohne SAVE"
@@ -367,17 +461,33 @@ Message ErrMsgMissingLTORG
  "unaufgel&ouml;ste Literale (LTORG fehlt)"
  "unresolved literals (missing LTORG)"
 
-Message ErrMsgNotOnThisCPU1
- "Befehl auf dem "
- "instruction not allowed on "
+Message ErrMsgInstructionNotOnThisCPUSupported
+ "Befehl auf dem %s nicht unterst&uuml;tzt"
+ "instruction not supported on %s"
 
-Message ErrMsgNotOnThisCPU2
- " nicht vorhanden"
- ""
+Message ErrMsgAddrModeNotOnThisCPUSupported
+ "Adressierungsart auf dem %s nicht unterst&uuml;tzt"
+ "addressing mode not supported on %s"
 
-Message ErrMsgNotOnThisCPU3
- "Adressierungsart auf dem "
- "addressing mode not allowed on "
+Message ErrMsgFPUNotEnabled
+ "FPU-Befehle nicht freigeschaltet"
+ "FPU instructions are not enabled"
+
+Message ErrMsgPMMUNotEnabled
+ "PMMU-Befehle nicht freigeschaltet"
+ "PMMU instructions are not enabled"
+
+Message ErrMsgFullPMMUNotEnabled
+ "voller PMMU-Befehlssatz nicht freigeschaltet"
+ "full PMMU instruction set is not enabed"
+
+Message ErrMsgZ80SyntaxNotEnabled
+ "Z80-Syntax nicht erlaubt"
+ "Z80 syntax was not allowed"
+
+Message ErrMsgZ80SyntaxExclusive
+ "nicht im Z80-Syntax Exklusiv-Modus erlaubt"
+ "not allowed in exclusive Z80 syntax mode"
 
 Message ErrMsgInvBitPos
  "ung&uuml;ltige Bitstelle"
@@ -414,6 +524,18 @@ Message ErrMsgPhaseDisallowed
 Message ErrMsgInvStructDir
  "Ung&uuml;ltige STRUCT-Direktive"
  "invalid STRUCT directive"
+
+Message ErrMsgDoubleStruct
+ "Struktur redefiniert"
+ "structure re-defined"
+
+Message ErrMsgUnresolvedStructRef
+ "nicht aufl&ouml;sbare Strukturelement-Referenz"
+ "unresolvable structure element reference"
+
+Message ErrMsgNotRepeatable
+ "Anweisung nicht wiederholbar"
+ "instruction is not repeatable"
 
 Message ErrMsgShortRead
  "vorzeitiges Dateiende"
@@ -455,6 +577,22 @@ Message ErrMsgOpenMacro
  "offene Makrodefinition"
  "open macro definition"
 
+Message ErrMsgOpenIRP
+ "IRP ohne ENDM"
+ "IRP without ENDM"
+
+Message ErrMsgOpenIRPC
+ "IRPC ohne ENDM"
+ "IRPC without ENDM"
+
+Message ErrMsgOpenREPT
+ "REPT ohne ENDM"
+ "REPT without ENDM"
+
+Message ErrMsgOpenWHILE
+ "WHILE ohne ENDM"
+ "WHILE without ENDM"
+
 Message ErrMsgDoubleMacro
  "doppelte Makrodefinition"
  "macro double defined"
@@ -462,6 +600,14 @@ Message ErrMsgDoubleMacro
 Message ErrMsgTooManyMacParams
  "mehr als 10 Makroparameter"
  "more than 10 macro parameters"
+
+Message ErrMsgUndefKeyArg
+ "Schl&uuml;sselwortargument nicht in Makro definiert"
+ "keyword argument not defined in macro"
+
+Message ErrMsgNoPosArg
+ "Positionsargument nach Schl&uuml;sselwortargumenten nicht mehr erlaubt"
+ "positional argument no longer allowed after keyword argument"
 
 Message ErrMsgEXITMOutsideMacro
  "EXITM au&szlig;erhalb eines Makrorumpfes"
@@ -480,8 +626,8 @@ Message ErrMsgMissingIf
  "ELSEIF/ENDIF without IF"
 
 Message ErrMsgRekMacro
- "verschachtelter/rekursiver Makroaufruf"
- "nested/recursive makro call"
+ "zu tief verschachtelter/rekursiver Makroaufruf"
+ "too deeply nested/recursive makro call"
 
 Message ErrMsgUnknownFunc
  "unbekannte Funktion"
@@ -510,6 +656,10 @@ Message ErrMsgNotFromThisAddress
 Message ErrMsgTargOnDiffPage
  "Sprungziel nicht auf gleicher Seite"
  "jump target not on same page"
+
+Message ErrMsgTargOnDiffSection
+ "Sprungziel nicht in gleicher Sektion"
+ "jump target not in same section"
 
 Message ErrMsgCodeOverflow
  "Code&uuml;berlauf"
@@ -571,6 +721,134 @@ Message ErrMsgOnlyInMaxmode
  "nicht im Minimum-Modus zul&auml;ssig"
  "not allowed in minimum mode"
 
+Message ErrMsgPackCrossBoundary
+ "Anweisungspaket &uuml;berschreitet Adre&szlig;grenze"
+ "execution packet crosses address boundary"
+
+Message ErrMsgUnitMultipleUsed
+ "Ausf&uuml;hrungseinheit mehrfach benutzt"
+ "multiple use of same execution unit"
+
+Message ErrMsgMultipleLongRead
+ "mehrfache Lang-Leseoperation"
+ "multiple long read operations"
+
+Message ErrMsgMultipleLongWrite
+ "mehrfache Lang-Schreiboperation"
+ "multiple long write operations"
+
+Message ErrMsgLongReadWithStore
+ "Lang-Lese- mit Schreiboperation"
+ "long read with write operation"
+
+Message ErrMsgTooManyRegisterReads
+ "zu viele Lesezugriffe auf ein Register"
+ "too many reads of one register"
+
+Message ErrMsgOverlapDests
+ "&uuml;berlappende Ziele"
+ "overlapping destinations"
+
+Message ErrMsgTooManyBranchesInExPacket
+ "zu viele absolute Spr&uuml;nge in einem Anweisungspaket"
+ "too many absolute branches in one execution packet"
+
+Message ErrMsgCannotUseUnit
+ "Anweisung nicht auf diese Funktionseinheit ausf&uuml;hrbar"
+ "instruction cannot be executed on this unit"
+
+Message ErrMsgInvEscSequence
+ "Ung&uuml;ltige Escape-Sequenz"
+ "invalid escape sequence"
+
+Message ErrMsgInvPrefixCombination
+ "ung&uuml;ltige Pr&auml;fix-Kombination"
+ "invalid combination of prefixes"
+
+Message ErrMsgConstantRedefinedAsVariable
+ "Konstante kann nicht als Variable redefiniert werden"
+ "constants cannot be redefined as variables"
+
+Message ErrMsgVariableRedefinedAsConstant
+ "Variable kann nicht als Konstante redefiniert werden"
+ "variables cannot be redefined as constants"
+
+Message ErrMsgStructNameMissing
+ "Strukturname fehlt"
+ "structure name missing"
+
+Message ErrMsgEmptyArgument
+ "leeres Argument"
+ "empty argument"
+
+Message ErrMsgUnimplemented
+ "nicht implementierte Anweisung"
+ "unimplemented instruction"
+
+Message ErrMsgFreestandingUnnamedStruct
+ "namenlose Struktur nicht Teil einer anderen Struktur"
+ "unnamed structure is not part of another structure"
+
+Message ErrMsgSTRUCTEndedByENDUNION
+ "STRUCT durch ENDUNION beendet"
+ "STRUCT ended by ENDUNION"
+
+Message ErrMsgAddrOnDifferentPage
+ "Speicheradresse nicht auf aktiver Seite"
+ "Memory address mot on active memory page"
+
+Message ErrMsgUnknownMacExpMod
+ "unbekanntes Makro-Expansions-Argument"
+ "unknown macro expansion argument"
+
+Message ErrMsgTooManyMacExpMod
+ "zu viele Makro-Expansions-Argumente"
+ "too many macro expansion arguments"
+
+Message ErrMsgConflictingMacExpMod
+ "widerspr&uuml;chliche Angaben zur Makro-Expansion"
+ "contradicting macro expansion specifications"
+
+Message ErrMsgInvalidPrepDir
+ "unbekannte Pr&auml;prozessoranweisung"
+ "unknown preprocessing directive"
+
+Message ErrMsgExpectedError
+ "erwarteter Fehler nicht eingetreten"
+ "expected error did not occur"
+
+Message ErrMsgNoNestExpect
+ "Verschachtelung von EXPECT/ENDEXPECT nicht erlaubt"
+ "nesting of EXPECT/ENDEXPECT not allowed"
+
+Message ErrMsgMissingENDEXPECT
+ "fehlendes ENDEXPECT"
+ "missing ENDEXPECT"
+
+Message ErrMsgMissingEXPECT
+ "ENDEXPECT ohne EXPECT"
+ "ENDEXPECT without EXPECT"
+
+Message ErrMsgNoDefCkptReg
+ "kein Default-Checkpoint-Register definiert"
+ "no default checkpoint register defined"
+
+Message ErrMsgInvBitField
+ "ung&uuml;tiges Bitfeld"
+ "invalid bit field"
+
+Message ErrMsgArgValueMissing
+ "Argument-Wert fehlt"
+ "argument value missing"
+
+Message ErrMsgUnknownArg
+ "unbekanntes Argument"
+ "unknown argument"
+
+Message ErrMsgInternalError
+ "interner Fehler"
+ "internal error"
+
 Message ErrMsgOpeningFile
  "Fehler beim &Ouml;ffnen der Datei"
  "error in opening file"
@@ -599,6 +877,10 @@ Message ErrMsgStackOvfl
  "Stapel&uuml;berlauf"
  "stack overflow"
  
+Message ErrMsgTooManyErrors
+ "zu viele Fehler, Assembler abgebrochen"
+ "too many errors, assembly terminated"
+
 Message ErrMsgIsFatal
  "Fataler Fehler, Assembler abgebrochen"
  "fatal error, assembly terminated"
@@ -625,29 +907,85 @@ Message ErrMsgNoRelocs
 
 Message ErrMsgUnresRelocs
  "unverarbeitete externe Referenzen"
- "unresolved external references"
+ "unprocessed external references"
+
+Message ErrMsgUnexportable
+ "Symbol nicht exportierbar"
+ "cannot export this symbol"
+
+Message ErrMsgArgCntZero
+ "erwarte kein Argument, erhielt %d"
+ "expected no argument but got %d"
+
+Message ErrMsgArgCntOne
+ "erwarte ein Argument, erhielt %d"
+ "expected one argument but got %d"
+
+Message ErrMsgArgCntMulti
+ "erwarte %d Argumente, erhielt %d"
+ "expected %d arguments but got %d"
+
+Message ErrMsgArgCntFromTo
+ "erwarte zwischen %d und %d Argumente, erhielt %d"
+ "expected between %d and %d arguments but got %d"
+
+Message ErrMsgArgCntEitherOr
+ "erwarte %d oder %d Argumente, erhielt %d"
+ "expected %d or %d arguments but got %d"
+
+Message ErrMsgAddrArgCnt
+ "Adre&szlig;ausdruck erwartet zwischen %d und %d Argumente, erhielt %d"
+ "address expression expects between %d and %d arguments but got %d"
+
+Message ErrMsgCannotSplitArg
+ "Kann Argument nicht in Teile aufspalten"
+ "failed splitting argument into parts"
+
+Message ErrMsgMinCPUSupported
+ "ab %s unterst&uuml;tzt"
+ "supported by %s and above"
+
+Message ErrMsgMaxCPUSupported
+ "bis %s unterst&uuml;tzt"
+ "supported by %s and below"
+
+Message ErrMsgRangeCPUSupported
+ "von %s bis %s unterst&uuml;tzt"
+ "supported by %s to %s" 
+
+Message ErrMsgOnlyCPUSupported1
+ "nur von "
+ "supported only by "
+
+Message ErrMsgOnlyCPUSupportedOr
+ " oder "
+ " or "
+
+Message ErrMsgOnlyCPUSupported2
+ " unterst&uuml;tzt"
+ ""
 
 ;----------------------------------------------------------------------------
 ; Strings in Listingkopfzeile
 
 Message HeadingFileNameLab
  " - Quelle "
- " - source file "
+ " - Source File "
 
 Message HeadingPageLab
  " - Seite "
- " - page "
+ " - Page "
 
 ;----------------------------------------------------------------------------
 ; Strings in Listing
 
 Message ListSymListHead1
  "  Symboltabelle (*=unbenutzt):"
- "  symbol table (* = unused):"
+ "  Symbol Table (* = unused):"
 
 Message ListSymListHead2
  "  ----------------------------"
- "  ------------------------"
+ "  --------------------------"
 
 Message ListSymSumMsg
  " Symbol"
@@ -667,7 +1005,7 @@ Message ListUSymSumsMsg
 
 Message ListRegDefListHead1
  "  Registerdefinitionen (*=unbenutzt):"
- "  register definitions (*=unused):"
+ "  Register Definitions (*=unused):"
 
 Message ListRegDefListHead2
  "  -----------------------------------"
@@ -691,7 +1029,7 @@ Message ListRegDefUSumsMsg
 
 Message ListCodepageListHead1
  "  Zeichentabellen:"
- "  codepages:"
+ "  Code Pages:"
 
 Message ListCodepageListHead2
  "  ----------------"
@@ -715,7 +1053,7 @@ Message ListCodepageSumsMsg
 
 Message ListMacListHead1
  "  definierte Makros:"
- "  defined macros:"
+ "  Defined Macros:"
 
 Message ListMacListHead2
  "  ------------------"
@@ -729,9 +1067,25 @@ Message ListMacSumsMsg
  " Makros"
  " macros"
 
+Message ListStructListHead1
+ "  definierte Strukturen/Unions:"
+ "  Defined Structures/Unions:"
+
+Message ListStructListHead2
+ "  -----------------------------"
+ "  --------------------------"
+
+Message ListStructSumMsg
+ " Struktur"
+ " structure"
+
+Message ListStructSumsMsg
+ " Strukturen"
+ " structures"
+
 Message ListFuncListHead1
  "  definierte Funktionen:"
- "  defined functions:"
+ "  Defined Functions:"
 
 Message ListFuncListHead2
  "  ----------------------"
@@ -747,7 +1101,7 @@ Message ListDefListHead2
 
 Message ListSegListHead1
  "in "
- "space used in "
+ "Space Used in "
 
 Message ListSegListHead2
  " belegte Bereiche:"
@@ -755,7 +1109,7 @@ Message ListSegListHead2
 
 Message ListCrossListHead1
  "  Querverweisliste:"
- "  cross reference list:"
+ "  Cross Reference List:"
 
 Message ListCrossListHead2
  "  -----------------"
@@ -763,7 +1117,7 @@ Message ListCrossListHead2
 
 Message ListSectionListHead1
  "  Sektionen:"
- "  sections:"
+ "  Sections:"
 
 Message ListSectionListHead2
  "  ----------"
@@ -771,7 +1125,7 @@ Message ListSectionListHead2
 
 Message ListIncludeListHead1
  "  Include-Verschachtelung:"
- "  nested include files:"
+ "  Nested Include Files:"
 
 Message ListIncludeListHead2
  "  ------------------------"
@@ -806,7 +1160,7 @@ Message ListSecoName
 
 Message InfoMessAssembling
  "Assembliere "
- "assembling "
+ "Assembling "
 
 Message InfoMessPass
  "PASS "
@@ -841,8 +1195,8 @@ Message InfoMessPPassCnt
  " passes"
 
 Message InfoMessNoPass
- "        zus&auml;tzliche erforderliche Durchl&auml;ufe wegen Fehlern nicht\n        durchgef&uuml;hrt, Listing m&ouml;glicherweise inkorrekt"
- "        additional necessary passes not started due to\n        errors, listing possibly incorrect"
+ "        zus&auml;tzliche erforderliche Durchl&auml;ufe wegen Fehlern nicht\n        durchgef&uuml;hrt, Listing m&ouml;glicherweise inkorrekt."
+ "        Additional necessary passes not started due to\n        errors, listing possibly incorrect."
 
 Message InfoMessMacAssLine
  " Zeile inkl. Makroexpansionen"
@@ -878,19 +1232,19 @@ Message InfoMessRemainStack
 
 Message InfoMessNFilesFound
  ": keine Datei(en) zu assemblieren!"
- ": no file(s) to assemble!"
+ ": No file(s) to assemble!"
 
 Message InfoMessMacroAss
  "Makroassembler "
- "macro assembler "
+ "Macro Assembler "
 
 Message InfoMessVar
  "Version"
- "version"
+ "Version"
 
 Message InfoMessHead1
  "Aufruf : "
- "calling convention : "
+ "Calling Convention : "
 
 Message InfoMessHead2
  " [Optionen] [Datei] [Optionen] ..."
@@ -902,15 +1256,15 @@ Message KeyWaitMsg
 
 Message ErrMsgInvParam
  "ung&uuml;ltige Option: "
- "invalid option: "
+ "Invalid option: "
 
 Message ErrMsgInvEnvParam
  "ung&uuml;ltige Environment-Option: "
- "invalid environment option: "
+ "Invalid environment option: "
 
 Message InvMsgSource
  "Quelldatei?"
- "source file?"
+ "Source file?"
 
 Message InfoMessHelp
  "--------\n" \
@@ -921,13 +1275,18 @@ Message InfoMessHelp
  "-p : Sharefile im Pascal-Format       -c : Sharefile im C-Format\n" \
  "-a : Sharefile im AS-Format\n" \
  "-o <Name> : Namen der Code-Datei neu setzen\n" \
+ "-olist <Name> : Namen der Listdatei neu setzen\n" \
  "-shareout <Name> : Namen des Sharefiles neu setzen\n" \
  "-q, -quiet : Stille &Uuml;bersetzung\n" \
  "-cpu <Name> : Zielprozessor setzen\n" \
  "-alias <neu>=<alt> : Prozessor-Alias definieren\n" \
  "-l : Listing auf Konsole              -L : Listing auf Datei\n" \
+ "-listradix <2...36>: Zahlensystem im Listing\n" \
  "-i <Pfad>[:Pfad]... : Pfadliste f&uuml;r Includedateien\n" \
  "-D <Symbol>[,Symbol]... : Symbole vordefinieren\n" \
+ "-gnuerrors: Fehlermeldungen im GNU-Format\n" \
+ "-maxerrors <Anzahl> : Assemblierung nach <Anzahl> Fehlern abbrechen\n" \
+ "-Werror : Warnungen als Fehler behandeln\n" \
  "-E [Name] : Zieldatei f&uuml;r Fehlerliste,\n" \
  "            !0..!4 f&uuml;r Standardhandles\n" \
  "            Default <Quelldatei>.LOG\n" \
@@ -937,7 +1296,7 @@ Message InfoMessHelp
  "-s : Sektionsliste erzeugen           -t : Listing-Teile ein/ausblenden\n" \
  "-u : Belegungsliste erzeugen          -C : Querverweisliste erzeugen\n" \
  "-I : Include-Verschachtelungsliste ausgeben\n" \
- "-g : Debug-Informationen schreiben\n" \
+ "-g [map|atmel|noice] : Debug-Informationen schreiben\n" \
  "-A : kompaktere Symbolablage\n" \
  "-U : Case-sensitiv arbeiten\n" \
  "-x : erweiterte Fehlermeldungen       -n : Fehlermeldungen mit Nummer\n" \
@@ -955,13 +1314,18 @@ Message InfoMessHelp
  "-p : share file formatted for Pascal  -c : share file formatted for C\n" \
  "-a : share file formatted for AS\n" \
  "-o <name> : change name of code file\n" \
+ "-olist <nname> : change name of list file\n" \
  "-shareout <nname> : change name of share file\n" \
  "-q,  -quiet : silent compilation\n" \
  "-cpu <name> : set target processor\n" \
  "-alias <new>=<old> : define processor alias\n" \
  "-l : listing to console               -L : listing to file\n" \
+ "-listradix <2...36>: number system in listing\n" \
  "-i <path>[;path]... : list of paths for include files\n" \
  "-D <symbol>[,symbol]... : predefine symbols\n" \
+ "-gnuerrors: error messages in GNU format\n" \
+ "-maxerrors <number>: terminate assembly after <number> errors\n" \
+ "-Werror : treat warnings as errors\n" \
  "-E <name> : target file for error list,\n" \
  "            !0..!4 for standard handles\n" \
  "            default is <srcname>.LOG\n" \
@@ -971,7 +1335,7 @@ Message InfoMessHelp
  "-s : generate section list            -t : enable/disable parts of listing\n" \
  "-u : generate usage list              -C : generate cross reference list\n" \
  "-I : generate include nesting list\n" \
- "-g : write debug info\n" \
+ "-g [map|atmel|noice] : write debug info\n" \
  "-A : compact symbol table\n" \
  "-U : case-sensitive operation\n" \
  "-x : extended error messages          -n : add error #s to error messages\n" \

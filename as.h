@@ -1,11 +1,17 @@
+#ifndef _AS_H
+#define _AS_H
 /* as.h */
 /*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
 /* AS-Portierung                                                             */
 /*                                                                           */
 /* Hauptmodul                                                                */
 /*                                                                           */
-/* Historie:  4. 5.1996 Grundsteinlegung                                     */
-/*                                                                           */
 /*****************************************************************************/
 
 extern char *GetErrorPos(void);
+
+extern void WriteCode(void);
+
+#endif /* _AS_H */

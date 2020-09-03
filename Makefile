@@ -1,40 +1,49 @@
 include Makefile.def
 
 CURRDIR=./
-TAPE=/dev/ntape
+RM=rm -f
+NULL=
+OBLANK=$(NULL) $(NULL)
+
 DATE=`date +"%d%m%Y"`
 
-include makedefs.src
-
-include objdefs.unix
+ALLFLAGS = $(TARG_CFLAGS) -DINCDIR=\"$(INCDIR)\" -DLIBDIR=\"$(LIBDIR)\"
 
 include makedefs.files
 
-ALLFLAGS = $(CFLAGS) -D$(CHARSET) -DSTDINCLUDES=\"$(INCDIR)\" -DLIBDIR=\"$(LIBDIR)\"
-
 #---------------------------------------------------------------------------
-# primary targets
+# Primary Targets
 
-all: $(ALLTARGETS)
+binaries: $(ALLTARGETS)
 
-docs: $(TEX2DOCTARGET) $(TEX2HTMLTARGET)
-	cd doc_DE; $(MAKE) TEX2DOC=../$(TEX2DOCTARGET) TEX2HTML=../$(TEX2HTMLTARGET) RM="rm -f"
-	cd doc_EN; $(MAKE) TEX2DOC=../$(TEX2DOCTARGET) TEX2HTML=../$(TEX2HTMLTARGET) RM="rm -f"
+binaries-das: $(DASLTARGET) $(DASMSGTARGETS)
 
-$(ASLTARGET): $(AS_OBJECTS) $(ASM_OBJECTS) $(ST_OBJECTS) $(CODE_OBJECTS) $(NLS_OBJECTS)
-	$(LD) -o $(ASLTARGET) $(ASM_OBJECTS) $(AS_OBJECTS) $(ST_OBJECTS) $(CODE_OBJECTS) $(NLS_OBJECTS) -lm $(LDFLAGS)
+all: binaries docs
+
+include makedefs.src
+
+docs: docs_DE docs_EN
+
+$(ASLTARGET): $(ASM_OBJECTS) $(AS_OBJECTS) $(ST_OBJECTS) $(CODE_OBJECTS) $(NLS_OBJECTS)
+	$(TARG_LD) -o $(ASLTARGET) $(ASM_OBJECTS) $(AS_OBJECTS) $(ST_OBJECTS) $(CODE_OBJECTS) $(NLS_OBJECTS) -lm $(TARG_LDFLAGS)
+
+$(DASLTARGET): $(DASM_OBJECTS) $(DAS_OBJECTS) $(ST_OBJECTS) $(DECODE_OBJECTS)  $(NLS_OBJECTS)
+	$(TARG_LD) -o $(DASLTARGET) $(DASM_OBJECTS) $(DAS_OBJECTS) $(ST_OBJECTS)  $(DECODE_OBJECTS) $(NLS_OBJECTS) $(TARG_LDFLAGS)
 
 $(PLISTTARGET): $(PLIST_OBJECTS) $(NLS_OBJECTS)
-	$(LD) -o $(PLISTTARGET) $(PLIST_OBJECTS) $(NLS_OBJECTS) -lm $(LDFLAGS)
+	$(TARG_LD) -o $(PLISTTARGET) $(PLIST_OBJECTS) $(NLS_OBJECTS) -lm $(TARG_LDFLAGS)
+
+$(ALINKTARGET): $(ALINK_OBJECTS) $(NLS_OBJECTS)
+	$(TARG_LD) -o $(ALINKTARGET) $(ALINK_OBJECTS) $(NLS_OBJECTS) -lm $(TARG_LDFLAGS)
 
 $(PBINDTARGET): $(PBIND_OBJECTS) $(NLS_OBJECTS)
-	$(LD) -o $(PBINDTARGET) $(PBIND_OBJECTS) $(NLS_OBJECTS) -lm $(LDFLAGS)
+	$(TARG_LD) -o $(PBINDTARGET) $(PBIND_OBJECTS) $(NLS_OBJECTS) -lm $(TARG_LDFLAGS)
 
 $(P2HEXTARGET): $(P2HEX_OBJECTS) $(NLS_OBJECTS)
-	$(LD) -o $(P2HEXTARGET) $(P2HEX_OBJECTS) $(NLS_OBJECTS) -lm $(LDFLAGS)
+	$(TARG_LD) -o $(P2HEXTARGET) $(P2HEX_OBJECTS) $(NLS_OBJECTS) -lm $(TARG_LDFLAGS)
 
 $(P2BINTARGET): $(P2BIN_OBJECTS) $(NLS_OBJECTS)
-	$(LD) -o $(P2BINTARGET) $(P2BIN_OBJECTS) $(NLS_OBJECTS) -lm $(LDFLAGS)
+	$(TARG_LD) -o $(P2BINTARGET) $(P2BIN_OBJECTS) $(NLS_OBJECTS) -lm $(TARG_LDFLAGS)
 
 $(RESCOMPTARGET): $(RESCOMP_OBJECTS)
 	$(LD) -o $(RESCOMPTARGET) $(RESCOMP_OBJECTS) $(LDFLAGS)
@@ -45,32 +54,74 @@ $(TEX2DOCTARGET): $(TEX2DOC_OBJECTS)
 $(TEX2HTMLTARGET): $(TEX2HTML_OBJECTS)
 	$(LD) -o $(TEX2HTMLTARGET) $(TEX2HTML_OBJECTS) $(LDFLAGS) -lm
 
+$(UMLAUTTARGET): $(UMLAUT_OBJECTS)
+	$(LD) -o $(UMLAUTTARGET) $(UMLAUT_OBJECTS) $(LDFLAGS)
+
 $(UNUMLAUTTARGET): $(UNUMLAUT_OBJECTS)
 	$(LD) -o $(UNUMLAUTTARGET) $(UNUMLAUT_OBJECTS) $(LDFLAGS)
+
+$(MKDEPENDTARGET): $(MKDEPEND_OBJECTS)
+	$(LD) -o $(MKDEPENDTARGET) $(MKDEPEND_OBJECTS) $(LDFLAGS)
+
+check_targ_cc:
+	@if test "$(TARG_CC)" = ""; then echo "TARG_CC is not set - please review Makefile.def"; exit 1; fi; exit 0
 
 #---------------------------------------------------------------------------
 # special rules for objects dependant on string resource files
 
 include makedefs.str
 
+binaries: $(ALLMSGTARGETS)
+
+include $(TARG_OBJDIR)codeobjs.dep
+include $(TARG_OBJDIR)asmobjs.dep
+include $(TARG_OBJDIR)asobjs.dep
+include $(TARG_OBJDIR)dasmobjs.dep
+include $(TARG_OBJDIR)dasobjs.dep
+include $(TARG_OBJDIR)nlsobjs.dep
+include $(TARG_OBJDIR)stobjs.dep
+include $(TARG_OBJDIR)plisobjs.dep
+include $(TARG_OBJDIR)alinobjs.dep
+include $(TARG_OBJDIR)pbinobjs.dep
+include $(TARG_OBJDIR)p2hxobjs.dep
+include $(TARG_OBJDIR)p2bnobjs.dep
+include $(OBJDIR)rescobjs.dep
+include $(OBJDIR)tx2dobjs.dep
+include $(OBJDIR)tx2hobjs.dep
+include $(OBJDIR)umlobjs.dep
+include $(OBJDIR)uumlobjs.dep
+
 #---------------------------------------------------------------------------
-# supplementary targets
+# Documentation
 
-test: $(ALLTARGETS)
-	cd tests; ./testall
+INCFILES = doc_COM/taborg*.tex doc_COM/tabids*.tex doc_COM/pscpu.tex doc_COM/pscomm.tex doc_COM/biblio.tex
 
-install: $(ALLTARGETS)
-	./install.sh $(BINDIR) $(INCDIR) $(MANDIR) $(LIBDIR) $(DOCDIR)
-
-clean:
-	rm -f $(ALLTARGETS) $(RESCOMPTARGET) $(TEX2DOCTARGET) $(TEX2HTMLTARGET) *.$(OBJEXTENSION) *.p *.rsc tests/testlog
-	cd doc_DE; $(MAKE) RM="rm -f" clean
-	cd doc_EN; $(MAKE) RM="rm -f" clean
+DOC_DE_DIR=doc_DE/
+include $(DOC_DE_DIR)makedefs.dok
+DOC_EN_DIR=doc_EN/
+include $(DOC_EN_DIR)makedefs.dok
 
 #---------------------------------------------------------------------------
-# create distributions
+# Supplementary Targets
+
+test: binaries
+	cd tests; OBJDIR=$(TARG_OBJDIR) RUNCMD=$(TARG_RUNCMD) ./testall "$(TESTDIRS)"
+
+install: all
+	INSTROOT=$(INSTROOT) OBJDIR=$(OBJDIR) TARG_OBJDIR=$(TARG_OBJDIR) TARG_EXEXTENSION=$(TARG_EXEXTENSION) ./install.sh $(BINDIR) $(INCDIR) $(MANDIR) $(LIBDIR) $(DOCDIR)
+
+clean_doc: clean_doc_DE clean_doc_EN
+
+clean: clean_doc
+	if test "$(HOST_OBJEXTENSION)" != ""; then $(RM) *$(HOST_OBJEXTENSION) $(OBJDIR)*$(HOST_OBJEXTENSION); fi
+	if test "$(TARG_OBJEXTENSION)" != ""; then $(RM) *$(TARG_OBJEXTENSION) $(TARG_OBJDIR)*$(TARG_OBJEXTENSION); fi
+	$(RM) $(ALLTARGETS) $(HOSTTARGETS) $(OBJDIR)*.dep $(TARG_OBJDIR)*.dep *.p $(TARG_OBJDIR)*.msg *.rsc tests/testlog testlog
+
+#---------------------------------------------------------------------------
+# Create Distributions
 
 distrib: unjunk
+	@if test "$(VERSION)" = ""; then echo "VERSION is not set - please specify VERSION=... as argument"; exit 1; fi; exit 0
 	mkdir ../asl-$(VERSION)
 	tar cf - $(DISTARCHFILES) | (cd ../asl-$(VERSION); tar xvf -)
 	cd ..; tar cvf asl-$(VERSION).tar asl-$(VERSION)
@@ -78,80 +129,108 @@ distrib: unjunk
 	rm -rf ../asl-$(VERSION)
 	gzip -9 -f asl-$(VERSION).tar
 
-bindist:
+distdir: all $(UNUMLAUTTARGET)
+	@if test "$(VERSION)" = ""; then echo "VERSION is not set - please specify VERSION=... as argument"; exit 1; fi; exit 0
 	mkdir asl-$(VERSION)
 	chmod 755 asl-$(VERSION)
-	./install.sh asl-$(VERSION)/bin asl-$(VERSION)/include asl-$(VERSION)/man asl-$(VERSION)/lib asl-$(VERSION)/doc
+	OBJDIR=$(OBJDIR) TARG_OBJDIR=$(TARG_OBJDIR) TARG_EXEXTENSION=$(TARG_EXEXTENSION) ./install.sh asl-$(VERSION)/bin asl-$(VERSION)/include asl-$(VERSION)/man asl-$(VERSION)/lib asl-$(VERSION)/doc
+
+bindist-tgz: distdir
 	tar cvf asl-$(VERSION)-bin.tar asl-$(VERSION)
 	rm -rf asl-$(VERSION)
 	gzip -9 -f asl-$(VERSION)-bin.tar 
 
+bindist-zip: distdir
+	mv asl-$(VERSION)/lib/*.msg asl-$(VERSION)/bin/
+	rmdir asl-$(VERSION)/lib
+	mv asl-$(VERSION)/man/man1/* asl-$(VERSION)/man/
+	rmdir asl-$(VERSION)/man/man1/
+	cd asl-$(VERSION) && zip -9 -r ../asl-$(VERSION)-bin.zip .
+	rm -rf asl-$(VERSION)
+
+win32-bindist: $(UNUMLAUTTARGET)
+	rm -rf as
+	mkdir as
+	cmd /cinstw32.cmd as\\bin as\\include as\\man as\\lib as\\doc
+	cd as; zip -9 -r ../as$(VERSION).zip *.*
+	zip -9 -r as$(VERSION).zip bin/cyg*
+	rm -rf as
+
+#---------------------------------------------------------------------------
+# the Debian package (only works under Debian Linux!!!)
+
+debian: docs debversion
+	echo "asl (`./debversion -v`) stable; urgency=low" >debian/changelog
+	echo "" >>debian/changelog
+	echo "  * no changelog here" >>debian/changelog
+	echo "" >>debian/changelog
+	echo " -- Alfred Arnold <alfred@ccac.rwth-aachen.de> " `822-date` >>debian/changelog
+	echo "" >>debian/changelog
+	echo `./debversion -v`; 
+	dpkg-shlibdeps $(ASLTARGET) $(ALINKTARGET) $(PBINDTARGET) $(PLISTTARGET) $(P2HEXTARGET) $(P2BINTARGET)
+	rm -rf bindebian
+	mkdir -p bindebian/DEBIAN
+	echo "Package: asl" >>bindebian/DEBIAN/control
+	echo "Version:" `./debversion -v` >>bindebian/DEBIAN/control
+	echo "Section: base" >>bindebian/DEBIAN/control
+	echo "Priority: optional" >>bindebian/DEBIAN/control
+	echo "Architecture:" `./debversion -a` >>bindebian/DEBIAN/control
+	cat debian-files/control >>bindebian/DEBIAN/control
+	cp debian-files/postinst debian-files/prerm bindebian/DEBIAN/
+	mkdir -p bindebian/usr/lib/asl/
+	cp *.msg bindebian/usr/lib/asl/
+	mkdir bindebian/usr/lib/asl/include/
+	cp include/*.inc bindebian/usr/lib/asl/include/
+	mkdir -p bindebian/usr/share/doc/asl/
+	cp debian-files/copyright bindebian/usr/share/doc/asl/
+	cp changelog bindebian/usr/share/doc/asl/
+	mkdir bindebian/usr/share/doc/asl/de/ bindebian/usr/share/doc/asl/en/
+	cp doc_DE/as.doc doc_DE/as.html bindebian/usr/share/doc/asl/de/
+	cp doc_EN/as.doc doc_EN/as.html bindebian/usr/share/doc/asl/en/
+	cp debian-files/changelog.Debian bindebian/usr/share/doc/asl/
+	gzip -9 bindebian/usr/share/doc/asl/changelog*
+	mkdir -p bindebian/usr/bin
+	cp $(ASLTARGET) bindebian/usr/bin
+	cp $(ALINKTARGET) bindebian/usr/bin
+	cp $(PBINDTARGET) bindebian/usr/bin
+	cp $(PLISTTARGET) bindebian/usr/bin
+	cp $(P2HEXTARGET) bindebian/usr/bin
+	cp $(P2BINTARGET) bindebian/usr/bin
+	strip bindebian/usr/bin/*
+	strip -R .note -R .comment bindebian/usr/bin/*
+	mkdir -p bindebian/usr/share/man/man1
+	cp man/*.1 bindebian/usr/share/man/man1
+	gzip -9 bindebian/usr/share/man/man1/*.1
+	find bindebian -type f | xargs chmod 644
+	chmod 755 bindebian/usr/bin/* bindebian/DEBIAN/postinst bindebian/DEBIAN/prerm
+	find bindebian -type d | xargs chmod 755
+	fakeroot dpkg-deb --build bindebian
+	mv bindebian.deb asl_`./debversion -v`_`./debversion -a`.deb
+
 #---------------------------------------------------------------------------
 # for my own use only...
 
-tape: unjunk
-	tar cvf $(TAPE) $(ARCHFILES)
-
-disk: unjunk archive
-	mcopy -nvm asport.tar.gz a:ASPORT.TGZ
-
-disks: unjunk archives
-	echo Insert disk 1...
-	read tmp
-	mcopy -nvm asport1.tar.gz a:ASPORT1.TGZ
-	echo Insert disk 2...
-	read tmp
-	mcopy -nvm asport2.tar.gz a:ASPORT2.TGZ
-
 archive: unjunk asport.tar.gz
-
-barchive: unjunk asport.tar.bz2
-
-archives: unjunk asport1.tar.gz asport2.tar.gz
+zarchive: unjunk asport.zip
 
 asport.tar.gz: $(ARCHFILES)
 	tar cvf asport.tar $(ARCHFILES)
 	gzip -9 -f asport.tar
 
-asport.tar.bz2: $(ARCHFILES)
-	tar cvf asport.tar $(ARCHFILES)
-	bzip2 asport.tar
+asport.zip: $(ARCHFILES)
+	zip -9 -r asport $(ARCHFILES)
 
-asport1.tar.gz: $(ARCH1FILES)
-	tar cvf asport1.tar $(ARCH1FILES)
-	gzip -9 -f asport1.tar
-
-asport2.tar.gz: $(ARCH2FILES)
-	tar cvf asport2.tar $(ARCH2FILES)
-	gzip -9 -f asport2.tar
-
-snap: unjunk
-	-mount /mo
-	-mkdir -p /mo/public/asport/snap_$(DATE)
-	cp -av $(ARCHFILES) /mo/public/asport/snap_$(DATE)
-	umount /mo
-
-unjunk:
-	rm -f tmp.* n.c include/stddef56.inc asmpars.cas.c include/fileform* config.h test.h loc.c gennop.c \
-           nops.asm bind.* asmutils.* asmmessages.* filenums.* includelist.* tests/warnlog_* \
-           insttree.* flt1750.* t_65.* test87c8.* testst9.* testst7.* testtms7.* test3203.* \
-           ioerrors.new.c codeallg.* ASM*.c *_msg*.h p2BIN.* \
-           decodecmd.* ioerrors.* stringutil.* *split.c marks.c \
-	   `find . -name "testlog" -print` \
+unjunk: clean_doc_DE clean_doc_EN
+	$(RM) `find . -name "testlog" -print` \
 	   `find . -name "*~" -print` \
 	   `find . -name "core" -print` \
-           `find . -name "*.core" -print` \
+	   `find . -name "*.core" -print` \
 	   `find . -name "*.lst" -print` \
 	   `find . -name "lst" -print` \
-           `find . -name "*.noi" -print`
-	cd doc_DE; $(MAKE) clean RM="rm -f"
-	cd doc_EN; $(MAKE) clean RM="rm -f"
-
-depend:
-	$(CC) $(ALLFLAGS) -MM *.c >depfile
+	   `find . -name "*.noi" -print`
 
 #---------------------------------------------------------------------------
 
-.SUFFIXES: .c
-.c.$(OBJEXTENSION):
-	$(CC) $(ALLFLAGS) -c $*.c
+.SUFFIXES: .asm
+.asm.p:
+	./asl -L -q $*.asm

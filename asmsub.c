@@ -1,28 +1,18 @@
 /* asmsub.c */
 /*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
 /* AS-Portierung                                                             */
 /*                                                                           */
 /* Unterfunktionen, vermischtes                                              */
 /*                                                                           */
-/* Historie:  4. 5.1996 Grundsteinlegung                                     */
-/*           13. 8.1997 KillBlanks-Funktionen nach stringutil.c geschoben    */
-/*           26. 6.1998 Fehlermeldung Codepage nicht gefunden                */
-/*            7. 7.1998 Fix Zugriffe auf CharTransTable wg. signed chars     */
-/*           17. 8.1998 Unterfunktion zur Buchhaltung Adressbereiche         */
-/*            1. 9.1998 FloatString behandelte Sonderwerte nicht korrekt     */
-/*           13. 9.1998 Prozessorliste macht Zeilenvorschub nach 6 Namen     */
-/*           14.10.1998 Fehlerzeilen mit > > >                               */
-/*           30. 1.1999 Formatstrings maschinenunabhaengig gemacht           */
-/*           18. 4.1999 Ausgabeliste Sharefiles                              */
-/*           13. 7.1999 Fehlermeldungen relokatible Symbole                  */
-/*           13. 9.1999 I/O-Fehler 25 ignorieren                             */
-/*            5.11.1999 ExtendErrors ist jetzt ShortInt                      */
-/*                                                                           */
 /*****************************************************************************/
+
 
 #include "stdinc.h"
 #include <string.h>
 #include <ctype.h>
+#include <stdarg.h>
 
 #include "version.h"
 #include "endian.h"
@@ -34,6 +24,7 @@
 #include "stringlists.h"
 #include "chunks.h"
 #include "ioerrs.h"
+#include "errmsg.h"
 #include "asmdef.h"
 #include "asmpars.h"
 #include "asmdebug.h"
@@ -44,252 +35,200 @@
 
 #ifdef __TURBOC__
 #ifdef __DPMI16__
-#define STKSIZE 40960
+#define STKSIZE 36864
 #else
 #define STKSIZE 49152
 #endif
 #endif
 
+#define VALID_S1 1
+#define VALID_SN 2
+#define VALID_M1 4
+#define VALID_MN 8
 
-Word ErrorCount,WarnCount;
-static StringList CopyrightList, OutList, ShareOutList;
+static StringList CopyrightList, OutList, ShareOutList, ListOutList;
 
-static LongWord StartStack,MinStack,LowStack;
+static LongWord StartStack, MinStack, LowStack;
+
+static unsigned ValidSymCharLen;
+static Byte *ValidSymChar;
 
 /****************************************************************************/
 /* Modulinitialisierung */
 
-        void AsmSubInit(void)
-BEGIN
-   PageLength=60; PageWidth=0;
-   ErrorCount=0; WarnCount=0;
-END
-
-/****************************************************************************/
-/* neuen Prozessor definieren */
-
-        CPUVar AddCPU(char *NewName, TSwitchProc Switcher)
-BEGIN
-   PCPUDef Lauf,Neu;
-   char *p;
-
-   Neu=(PCPUDef) malloc(sizeof(TCPUDef));
-   Neu->Name=strdup(NewName); 
-   /* kein UpString, weil noch nicht initialisiert ! */
-   for (p=Neu->Name; *p!='\0'; p++) *p=toupper(*p);
-   Neu->SwitchProc=Switcher;
-   Neu->Next=Nil;
-   Neu->Number=Neu->Orig=CPUCnt;
-
-   Lauf=FirstCPUDef;
-   if (Lauf==Nil) FirstCPUDef=Neu;
-   else
-    BEGIN
-     while (Lauf->Next!=Nil) Lauf=Lauf->Next;
-     Lauf->Next=Neu;
-    END
-
-   return CPUCnt++;
-END
-
-        Boolean AddCPUAlias(char *OrigName, char *AliasName)
-BEGIN
-   PCPUDef Lauf=FirstCPUDef,Neu;
-
-   while ((Lauf!=Nil) AND (strcmp(Lauf->Name,OrigName)!=0)) Lauf=Lauf->Next;
-
-   if (Lauf==Nil) return False;
-   else
-    BEGIN
-     Neu=(PCPUDef) malloc(sizeof(TCPUDef));
-     Neu->Next=Nil; 
-     Neu->Name=strdup(AliasName);
-     Neu->Number=CPUCnt++;
-     Neu->Orig=Lauf->Orig;
-     Neu->SwitchProc=Lauf->SwitchProc;
-     while (Lauf->Next!=Nil) Lauf=Lauf->Next;
-     Lauf->Next=Neu;
-     return True;
-    END
-END
-
-	void PrintCPUList(TSwitchProc NxtProc)
-BEGIN
-   PCPUDef Lauf;
-   TSwitchProc Proc;
-   int cnt;
-
-   Lauf=FirstCPUDef; Proc=NullProc; cnt=0;
-   while (Lauf!=Nil)
-    BEGIN
-     if (Lauf->Number==Lauf->Orig)
-      BEGIN
-       if ((Lauf->SwitchProc!=Proc) OR (cnt==7))
-        BEGIN
-         Proc=Lauf->SwitchProc; printf("\n"); NxtProc(); cnt=0;
-        END
-       printf("%-10s",Lauf->Name); cnt++;
-      END
-     Lauf=Lauf->Next;
-    END
-   printf("\n"); NxtProc();
-END
-
-	void ClearCPUList(void)
-BEGIN
-   PCPUDef Save;
-   
-   while (FirstCPUDef!=Nil)
-    BEGIN
-     Save=FirstCPUDef; FirstCPUDef=Save->Next;
-     free(Save->Name); free(Save);
-    END
-END	
+void AsmSubPassInit(void)
+{
+  PageLength = 60;
+  PageWidth = 0;
+}
 
 /****************************************************************************/
 /* Copyrightlistenverwaltung */
 
-        void AddCopyright(char *NewLine)
-BEGIN
-   AddStringListLast(&CopyrightList,NewLine);
-END
+void AddCopyright(const char *NewLine)
+{
+  AddStringListLast(&CopyrightList, NewLine);
+}
 
-        void WriteCopyrights(TSwitchProc NxtProc)
-BEGIN
-   StringRecPtr Lauf;
+void WriteCopyrights(TSwitchProc NxtProc)
+{
+  StringRecPtr Lauf;
 
-   if (NOT StringListEmpty(CopyrightList)) 
-    BEGIN
-     printf("%s\n",GetStringListFirst(CopyrightList,&Lauf)); NxtProc();
-     while (Lauf!=Nil) 
-      BEGIN
-       printf("%s\n",GetStringListNext(&Lauf)); NxtProc();
-      END
-    END
-END
+  if (!StringListEmpty(CopyrightList))
+  {
+    printf("%s\n", GetStringListFirst(CopyrightList, &Lauf));
+    NxtProc();
+    while (Lauf)
+    {
+      printf("%s\n", GetStringListNext(&Lauf));
+      NxtProc();
+    }
+  }
+}
 
 /*--------------------------------------------------------------------------*/
 /* ermittelt das erste/letzte Auftauchen eines Zeichens ausserhalb */
 /* "geschuetzten" Bereichen */
 
-#if 0
-	char *QuotPos(char *s, char Zeichen)
-BEGIN
-   register int Cnt=0;
-   register char *i;
-   register char ch,Cmp2,Cmp3;
+char *QuotMultPos(const char *s, const char *pSearch)
+{
+  register ShortInt Brack = 0, AngBrack = 0;
+  register const char *i;
+  Boolean InSglQuot = False, InDblQuot = False, ThisEscaped = False, NextEscaped = False;
 
-   for (i=s; (ch=*i)!='\0'; i++)
-    if (Cnt==0)
-     BEGIN
-      if (ch==Zeichen) return i;
-      else switch (ch)
-       BEGIN
-        case '"':
-        case '\'': Cmp2='\0'; Cmp3=ch; Cnt=1; break;
-        case '(': Cmp2='('; Cmp3=')'; Cnt=1; break;
-        case '[': Cmp2='['; Cmp3=']'; Cnt=1; break;
-       END
-     END
-    else
-     BEGIN
-      if (ch==Cmp2) Cnt++;
-      else if (ch==Cmp3) Cnt--;
-     END
+  for (i = s; *i; i++, ThisEscaped = NextEscaped)
+  {
+    NextEscaped = False;
+    if (strchr(pSearch, *i))
+    {
+      if (!AngBrack && !Brack && !InSglQuot && !InDblQuot)
+        return (char*)i;
+    }
+    switch (*i)
+    {
+      case '"':
+        if (!InSglQuot && !ThisEscaped)
+          InDblQuot = !InDblQuot;
+        break;
+      case '\'':
+        if (!InDblQuot && !ThisEscaped)
+          InSglQuot = !InSglQuot;
+        break;
+      case '\\':
+        if ((InSglQuot || InDblQuot) && !ThisEscaped)
+          NextEscaped = True;
+        break;
+      case '(':
+        if (!AngBrack && !InDblQuot && !InSglQuot)
+          Brack++;
+        break;
+      case ')':
+        if (!AngBrack && !InDblQuot && !InSglQuot)
+          Brack--;
+        break;
+      case '[':
+        if (!Brack && !InDblQuot && !InSglQuot)
+          AngBrack++;
+        break;
+      case ']':
+        if (!Brack && !InDblQuot && !InSglQuot)
+          AngBrack--;
+        break;
+    }
+  }
 
-   return Nil;
-END
-#else
-        char *QuotPos(char *s, char Zeichen)
-BEGIN
-   register ShortInt Brack=0,AngBrack=0;
-   register char *i;
-   register LongWord Flag=0;
-   static Boolean First=True,Imp[256],Save;
+  return NULL;
+}
 
-   if (First)
-    BEGIN
-     memset(Imp,False,256);
-     Imp['"']=Imp['\'']=Imp['(']=Imp[')']=Imp['[']=Imp[']']=True;
-     First=False;
-    END
-   
-   Save=Imp[(unsigned char)Zeichen]; Imp[(unsigned char)Zeichen]=True;
-   for (i=s; *i!='\0'; i++)
-    if (Imp[(unsigned char)*i])
-     BEGIN
-      if (*i==Zeichen)
-       BEGIN
-        if ((AngBrack|Brack|Flag)==0)
-         { Imp[(unsigned char)Zeichen]=Save; return i;}
-       END
-      else switch(*i)
-       BEGIN
-        case '"': if (((Brack|AngBrack)==0) AND ((Flag&2)==0)) Flag^=1; break;
-        case '\'':if (((Brack|AngBrack)==0) AND ((Flag&1)==0)) Flag^=2; break;
-        case '(': if ((AngBrack|Flag)==0) Brack++; break;
-        case ')': if ((AngBrack|Flag)==0) Brack--; break;
-        case '[': if ((Brack|Flag)==0) AngBrack++; break;
-        case ']': if ((Brack|Flag)==0) AngBrack--; break;
-       END
-     END
+char *QuotPos(const char *s, char Zeichen)
+{
+  char Tmp[2];
 
-   Imp[(unsigned char)Zeichen]=Save; return Nil;    
-END
-#endif
-        char *RQuotPos(char *s, char Zeichen)
-BEGIN
-   ShortInt Brack=0,AngBrack=0;
-   char *i;
-   Boolean Quot=False,Paren=False;
+  Tmp[0] = Zeichen;
+  Tmp[1] = '\0';
+  return QuotMultPos(s, Tmp);
+}
 
-   for (i=s+strlen(s)-1; i>=s; i--)
-    if (*i==Zeichen)
-     BEGIN
-      if ((AngBrack==0) AND (Brack==0) AND (NOT Paren) AND (NOT Quot)) return i;
-     END
+char *RQuotPos(char *s, char Zeichen)
+{
+  ShortInt Brack = 0, AngBrack = 0;
+  char *i;
+  Boolean Quot = False, Paren = False;
+
+  for (i = s + strlen(s) - 1; i >= s; i--)
+    if (*i == Zeichen)
+    {
+      if ((!AngBrack) && (!Brack) && (!Paren) && (!Quot))
+        return i;
+    }
     else switch (*i)
-     BEGIN
-      case '"': if ((Brack==0) AND (AngBrack==0) AND (NOT Quot)) Paren=NOT Paren; break;
-      case '\'':if ((Brack==0) AND (AngBrack==0) AND (NOT Paren)) Quot=NOT Quot; break;
-      case ')': if ((AngBrack==0) AND (NOT Paren) AND (NOT Quot)) Brack++; break;
-      case '(': if ((AngBrack==0) AND (NOT Paren) AND (NOT Quot)) Brack--; break;
-      case ']': if ((Brack==0) AND (NOT Paren) AND (NOT Quot)) AngBrack++; break;
-      case '[': if ((Brack==0) AND (NOT Paren) AND (NOT Quot)) AngBrack--; break;
-     END
+    {
+      case '"':
+        if ((!Brack) && (!AngBrack) && (!Quot))
+          Paren = !Paren;
+        break;
+      case '\'':
+        if ((!Brack) && (!AngBrack) && (!Paren))
+          Quot = !Quot;
+        break;
+      case ')':
+        if ((!AngBrack) && (!Paren) && (!Quot))
+          Brack++;
+        break;
+      case '(':
+        if ((!AngBrack) && (!Paren) && (!Quot))
+          Brack--;
+        break;
+      case ']':
+        if ((!Brack) && (!Paren) && (!Quot))
+          AngBrack++;
+        break;
+      case '[':
+        if ((!Brack) && (!Paren) && (!Quot))
+          AngBrack--;
+        break;
+    }
 
-   return Nil;
-END
+  return NULL;
+}
 
 /*--------------------------------------------------------------------------*/
-/* ermittelt das erste Leerzeichen in einem String */
+/* ermittelt das erste (nicht-) Leerzeichen in einem String */
 
-        char *FirstBlank(char *s)
-BEGIN
-   char *h,*Min=Nil;
+char *FirstBlank(const char *s)
+{
+  const char *h, *Min = NULL;
 
-   h=strchr(s,' ');  
-   if (h!=Nil) if ((Min==Nil) OR (h<Min)) Min=h;
-   h=strchr(s,Char_HT);
-   if (h!=Nil) if ((Min==Nil) OR (h<Min)) Min=h;
-   return Min;
-END
+  h = strchr(s, ' ');
+  if (h)
+    if ((!Min) || (h < Min))
+      Min = h;
+  h = strchr(s, Char_HT);
+  if (h)
+    if ((!Min) || (h < Min))
+      Min = h;
+  return (char*)Min;
+}
 
 /*--------------------------------------------------------------------------*/
 /* einen String in zwei Teile zerlegen */
 
-	void SplitString(char *Source, char *Left, char *Right, char *Trenner)
-BEGIN
-   char Save;
-   LongInt slen=strlen(Source);
+void SplitString(char *Source, char *Left, char *Right, char *Trenner)
+{
+  char Save;
+  LongInt slen = strlen(Source);
 
-   if ((Trenner==Nil) OR (Trenner>=Source+slen))
-    Trenner=Source+slen;
-   Save=(*Trenner); *Trenner='\0';
-   strcpy(Left,Source); *Trenner=Save;
-   if (Trenner>=Source+slen) *Right='\0';
-   else strcpy(Right,Trenner+1);
-END
+  if ((!Trenner) || (Trenner >= Source + slen))
+    Trenner = Source + slen;
+  Save = (*Trenner);
+  *Trenner = '\0';
+  strmov(Left, Source);
+  *Trenner = Save;
+  if (Trenner >= Source + slen)
+    *Right = '\0';
+  else
+    strmov(Right, Trenner + 1);
+}
 
 /*--------------------------------------------------------------------------*/
 /* verbesserte Grossbuchstabenfunktion */
@@ -297,1036 +236,1087 @@ END
 /* einen String in Grossbuchstaben umwandeln.  Dabei Stringkonstanten in Ruhe */
 /* lassen */
 
-	void UpString(char *s)
-BEGIN
-   char *z;
-   int hypquot=0;
+void UpString(char *s)
+{
+  char *z;
+  int hypquot = 0;
+  Boolean LastBk = FALSE, ThisBk;
 
-   for (z=s; *z!='\0'; z++)
-    BEGIN
-     if ((*z=='\'') AND ((hypquot&2)==0)) hypquot^=1;
-     else if ((*z=='"') AND ((hypquot&1)==0)) hypquot^=2;
-     else if (hypquot==0) *z=UpCaseTable[(int)*z];
-    END
-END
+  for (z = s; *z != '\0'; z++)
+  {
+    ThisBk = FALSE;
+    switch (*z)
+    {
+      case '\\':
+        ThisBk = TRUE;
+        break;
+      case '\'':
+        if ((!(hypquot & 2)) && (!LastBk))
+          hypquot ^= 1;
+        break;
+      case '"':
+        if ((!(hypquot & 1)) && (!LastBk))
+          hypquot ^= 2;
+        break;
+      default:
+        if (!hypquot)
+          *z = UpCaseTable[(int)*z];
+    }
+    LastBk = ThisBk;
+  }
+}
 
 /****************************************************************************/
 
-        void TranslateString(char *s)
-BEGIN
-   char *z;
+void TranslateString(char *s, int Length)
+{
+  char *pRun, *pEnd;
 
-   for (z=s; *z!='\0'; z++) *z=CharTransTable[((usint)(*z))&0xff];
-END
+  if (Length < 0)
+    Length = strlen(s);
+  for (pRun = s, pEnd = pRun + Length; pRun < pEnd; pRun++)
+    *pRun = CharTransTable[((usint)(*pRun)) & 0xff];
+}
 
-	ShortInt StrCmp(char *s1, char *s2, LongInt Hand1, LongInt Hand2)
-BEGIN
-   int tmp;
+ShortInt StrCaseCmp(const char *s1, const char *s2, LongInt Hand1, LongInt Hand2)
+{
+  int tmp;
 
-   tmp=(*s1)-(*s2);
-   if (tmp==0) tmp=strcmp(s1,s2);
-   if (tmp==0) tmp=Hand1-Hand2;
-   if (tmp<0) return -1;
-   if (tmp>0) return 1;
-   return 0;
-END
+  tmp = mytoupper(*s1) - mytoupper(*s2);
+  if (!tmp)
+    tmp = as_strcasecmp(s1, s2);
+  if (!tmp)
+    tmp = Hand1 - Hand2;
+  if (tmp < 0)
+    return -1;
+  if (tmp > 0)
+    return 1;
+  return 0;
+}
 
 /****************************************************************************/
 /* an einen Dateinamen eine Endung anhaengen */
 
-        void AddSuffix(char *s, char *Suff)
-BEGIN
-   char *p,*z,*Part;
+void AddSuffix(char *s, const char *Suff)
+{
+  char *p, *z, *Part;
 
-   p=Nil;
-   for (z=s; *z!='\0'; z++) if (*z=='\\') p=z;
-   Part=(p!=Nil)?(p):(s);
-   if (strchr(Part,'.')==Nil) strmaxcat(s,Suff,255);
-END
+  p = NULL;
+  for (z = s; *z != '\0'; z++)
+    if (*z == '\\')
+      p = z;
+  Part = p ? p : s;
+  if (!strchr(Part, '.'))
+    strmaxcat(s, Suff, STRINGSIZE);
+}
 
 
 /*--------------------------------------------------------------------------*/
 /* von einem Dateinamen die Endung loeschen */
 
-        void KillSuffix(char *s)
-BEGIN
-   char *p,*z,*Part;
+void KillSuffix(char *s)
+{
+  char *p, *z, *Part;
 
-   p=Nil;
-   for (z=s; *z!='\0'; z++) if (*z=='\\') p=z;
-   Part=(p!=Nil)?(p):(s); Part=strchr(Part,'.');
-   if (Part!=Nil) *Part='\0';
-END
+  p = NULL;
+  for (z = s; *z != '\0'; z++)
+    if (*z == '\\')
+      p = z;
+  Part = p ? p : s;
+  Part = strchr(Part, '.');
+  if (Part)
+    *Part = '\0';
+}
 
 /*--------------------------------------------------------------------------*/
 /* Pfadanteil (Laufwerk+Verzeichnis) von einem Dateinamen abspalten */
 
-        char *PathPart(char *Name)
-BEGIN
-   static String s;
-   char *p;
+char *PathPart(char *Name)
+{
+  static String s;
+  char *p;
 
-   strmaxcpy(s,Name,255);
+  strmaxcpy(s, Name, STRINGSIZE);
 
-   p=strrchr(Name,PATHSEP);
+  p = strrchr(Name, PATHSEP);
 #ifdef DRSEP
-   if (p==Nil) p=strrchr(Name,DRSEP);
+  if (!p)
+    p = strrchr(Name, DRSEP);
 #endif
 
-   if (p==Nil) *s='\0'; else s[1]='\0';
+  if (!p)
+    *s = '\0';
+  else
+    s[1] = '\0';
 
-   return s;
-END
+  return s;
+}
 
 /*--------------------------------------------------------------------------*/
 /* Namensanteil von einem Dateinamen abspalten */
 
-        char *NamePart(char *Name)
-BEGIN
-   char *p=strrchr(Name,PATHSEP);
+const char *NamePart(const char *Name)
+{
+  const char *p = strrchr(Name, PATHSEP);
 
 #ifdef DRSEP
-   if (p==Nil) p=strrchr(Name,DRSEP);
+  if (!p)
+    p = strrchr(Name, DRSEP);
 #endif
 
-   return (p==Nil)?(Name):(p+1);
-END
+  return p ? p + 1 : Name;
+}
 
 /****************************************************************************/
 /* eine Gleitkommazahl in einen String umwandeln */
 
-        char *FloatString(Double f)
-BEGIN
+void FloatString(char *pDest, int DestSize, Double f)
+{
 #define MaxLen 18
-   static String s;
-   char *p,*d;
-   sint n,ExpVal,nzeroes;
-   Boolean WithE,OK;
+  char *p, *d, ExpChar = HexStartCharacter + ('E' - 'A');
+  sint n, ExpVal, nzeroes;
+  Boolean WithE, OK;
 
-   /* 1. mit Maximallaenge wandeln, fuehrendes Vorzeichen weg */
+  /* 1. mit Maximallaenge wandeln, fuehrendes Vorzeichen weg */
 
-   sprintf(s,"%27.15e",f); 
-   for (p=s; (*p==' ') OR (*p=='+'); p++);
-   if (p!=s) strcpy(s,p);
+  (void)DestSize;
+  as_snprintf(pDest, DestSize, "%27.15e", f);
+  for (p = pDest; (*p == ' ') || (*p == '+'); p++);
+  if (p != pDest)
+    strmov(pDest, p);
 
-   /* 2. Exponenten soweit als moeglich kuerzen, evtl. ganz streichen */
+  /* 2. Exponenten soweit als moeglich kuerzen, evtl. ganz streichen */
 
-   p=strchr(s,'e'); 
-   if (p==Nil) return s;
-   switch (*(++p))
-    BEGIN
-     case '+': strcpy(p,p+1); break;
-     case '-': p++; break;
-    END
+  p = strchr(pDest, ExpChar);
+  if (!p)
+    return;
+  switch (*(++p))
+  {
+    case '+':
+      strmov(p, p + 1);
+      break;
+    case '-':
+      p++;
+      break;
+  }
 
-   while (*p=='0') strcpy(p,p+1);
-   WithE=(*p!='\0');
-   if (NOT WithE) s[strlen(s)-1]='\0';
+  while (*p == '0')
+    strmov(p, p + 1);
+  WithE = (*p != '\0');
+  if (!WithE)
+    pDest[strlen(pDest) - 1] = '\0';
 
-   /* 3. Nullen am Ende der Mantisse entfernen, Komma bleibt noch */
+  /* 3. Nullen am Ende der Mantisse entfernen, Komma bleibt noch */
 
-   if (WithE) p=strchr(s,'e'); else p=s+strlen(s); p--;
-   while (*p=='0') 
-    BEGIN
-     strcpy(p,p+1); p--;
-    END
+  p = WithE ? strchr(pDest, ExpChar) : pDest + strlen(pDest);
+  p--;
+  while (*p == '0')
+  {
+    strmov(p, p + 1);
+    p--;
+  }
 
-   /* 4. auf die gewuenschte Maximalstellenzahl begrenzen */
+  /* 4. auf die gewuenschte Maximalstellenzahl begrenzen */
 
-   if (WithE) p=strchr(s,'e'); else p=s+strlen(s);
-   d=strchr(s,'.');
-   n=p-d-1;
+  p = WithE ? strchr(pDest, ExpChar) : pDest + strlen(pDest);
+  d = strchr(pDest, '.');
+  n = p - d - 1;
 
-   /* 5. Maximallaenge ueberschritten ? */
+  /* 5. Maximallaenge ueberschritten ? */
 
-   if (strlen(s)>MaxLen) strcpy(d+(n-(strlen(s)-MaxLen)),d+n);
+  if (strlen(pDest) > MaxLen)
+    strmov(d + (n - (strlen(pDest) - MaxLen)), d + n);
 
-   /* 6. Exponentenwert berechnen */
+  /* 6. Exponentenwert berechnen */
 
-   if (WithE)
-    BEGIN
-     p=strchr(s,'e');
-     ExpVal=ConstLongInt(p+1,&OK);
-    END
-   else
-    BEGIN
-     p=s+strlen(s);
-     ExpVal=0;
-    END
+  if (WithE)
+  {
+    p = strchr(pDest, ExpChar);
+    ExpVal = ConstLongInt(p + 1, &OK, 10);
+  }
+  else
+  {
+    p = pDest + strlen(pDest);
+    ExpVal = 0;
+  }
 
-   /* 7. soviel Platz, dass wir den Exponenten weglassen und evtl. Nullen
-        anhaengen koennen ? */
+  /* 7. soviel Platz, dass wir den Exponenten weglassen und evtl. Nullen
+       anhaengen koennen ? */
 
-   if (ExpVal>0)
-    BEGIN
-     nzeroes=ExpVal-(p-strchr(s,'.')-1); /* = Zahl von Nullen, die anzuhaengen waere */
+  if (ExpVal > 0)
+  {
+    nzeroes = ExpVal - (p - strchr(pDest, '.') - 1); /* = Zahl von Nullen, die anzuhaengen waere */
 
-     /* 7a. nur Kommaverschiebung erforderlich. Exponenten loeschen und
-           evtl. auch Komma */
+    /* 7a. nur Kommaverschiebung erforderlich. Exponenten loeschen und
+          evtl. auch Komma */
 
-     if (nzeroes<=0)
-      BEGIN
-       *p='\0';
-       d=strchr(s,'.'); strcpy(d,d+1);
-       if (nzeroes!=0) 
-        BEGIN
-         memmove(s+strlen(s)+nzeroes+1,s+strlen(s)+nzeroes,-nzeroes);
-         s[strlen(s)-1+nzeroes]='.';
-        END
-      END
+    if (nzeroes <= 0)
+    {
+      *p = '\0';
+      d = strchr(pDest, '.');
+      strmov(d, d + 1);
+      if (nzeroes != 0)
+      {
+        memmove(pDest + strlen(pDest) + nzeroes + 1, pDest + strlen(pDest) + nzeroes, -nzeroes);
+        pDest[strlen(pDest) - 1 + nzeroes] = '.';
+      }
+    }
 
-     /* 7b. Es muessen Nullen angehaengt werden. Schauen, ob nach Loeschen von
-           Punkt und E-Teil genuegend Platz ist */
+    /* 7b. Es muessen Nullen angehaengt werden. Schauen, ob nach Loeschen von
+          Punkt und E-Teil genuegend Platz ist */
 
-     else
-      BEGIN
-       n=strlen(p)+1+(MaxLen-strlen(s)); /* = Anzahl freizubekommender Zeichen+Gutschrift */ 
-       if (n>=nzeroes)
-        BEGIN
-         *p='\0'; d=strchr(s,'.'); strcpy(d,d+1);
-         d=s+strlen(s); 
-         for (n=0; n<nzeroes; n++) *(d++)='0'; *d='\0';
-        END
-      END
-    END
+    else
+    {
+      n = strlen(p) + 1 + (MaxLen - strlen(pDest)); /* = Anzahl freizubekommender Zeichen+Gutschrift */
+      if (n >= nzeroes)
+      {
+        *p = '\0';
+        d = strchr(pDest, '.');
+        strmov(d, d + 1);
+        d = pDest + strlen(pDest);
+        for (n = 0; n < nzeroes; n++)
+          *(d++) = '0';
+        *d = '\0';
+      }
+    }
+  }
 
-   /* 8. soviel Platz, dass Exponent wegkann und die Zahl mit vielen Nullen
-        vorne geschrieben werden kann ? */
+  /* 8. soviel Platz, dass Exponent wegkann und die Zahl mit vielen Nullen
+       vorne geschrieben werden kann ? */
 
-   else if (ExpVal<0)
-    BEGIN
-     n=(-ExpVal)-(strlen(p)); /* = Verlaengerung nach Operation */
-     if (strlen(s)+n<=MaxLen)
-      BEGIN
-       *p='\0'; d=strchr(s,'.'); strcpy(d,d+1);
-       if (s[0]=='-') d=s+1; else d=s;
-       memmove(d-ExpVal+1,d,strlen(s)+1);
-       *(d++)='0'; *(d++)='.';
-       for (n=0; n<-ExpVal-1; n++) *(d++)='0';
-      END
-    END
+  else if (ExpVal < 0)
+  {
+    n = (-ExpVal) - (strlen(p)); /* = Verlaengerung nach Operation */
+    if (strlen(pDest) + n <= MaxLen)
+    {
+      *p = '\0';
+      d = strchr(pDest, '.'); 
+      strmov(d, d + 1);
+      d = (pDest[0] == '-') ? pDest + 1 : pDest;
+      memmove(d - ExpVal + 1, d, strlen(pDest) + 1);
+      *(d++) = '0';
+      *(d++) = '.';
+      for (n = 0; n < -ExpVal - 1; n++)
+        *(d++) = '0';
+    }
+  }
 
 
-   /* 9. Ueberfluessiges Komma entfernen */
+  /* 9. Ueberfluessiges Komma entfernen */
 
-   if (WithE) 
-    BEGIN
-     p=strchr(s,'e'); if (p!=Nil) *p='E';
-    END
-   else p=s+strlen(s);
-   if ((p!=Nil) AND (*(p-1)=='.')) strcpy(p-1,p);
-
-   return s;
-END
+  if (WithE)
+    p = strchr(pDest, ExpChar);
+  else
+    p = pDest + strlen(pDest);
+  if (p && (*(p - 1) == '.'))
+    strmov(p - 1, p);
+}
 
 /****************************************************************************/
 /* Symbol in String wandeln */
 
-        void StrSym(TempResult *t, Boolean WithSystem, char *Dest)
-BEGIN
-   switch (t->Typ)
-    BEGIN
-     case TempInt:
-      strcpy(Dest,HexString(t->Contents.Int,1));
+void StrSym(TempResult *t, Boolean WithSystem, char *Dest, int DestLen, unsigned Radix)
+{
+  switch (t->Typ)
+  {
+    case TempInt:
+      SysString(Dest, DestLen - 3, t->Contents.Int, Radix,
+                1, (16 == Radix) && (ConstMode == ConstModeIntel), HexStartCharacter);
       if (WithSystem)
-       switch (ConstMode)
-        BEGIN
-         case ConstModeIntel : strcat(Dest,"H"); break;
-         case ConstModeMoto  : strprep(Dest,"$"); break;
-         case ConstModeC     : strprep(Dest,"0x"); break;
-        END
+        switch (ConstMode)
+        {
+          case ConstModeIntel:
+            switch (Radix)
+            {
+              case 16:
+              case 8:
+              case 2:
+                as_snprcatf(Dest, DestLen, GetIntelSuffix(Radix));
+                break;
+            }
+            break;
+          case ConstModeMoto:
+            switch (Radix)
+            {
+              case 16:
+                strprep(Dest, "$");
+                break;
+              case 8:
+                strprep(Dest, "@");
+                break;
+              case 2:
+                strprep(Dest, "%");
+                break;
+            }
+            break;
+          case ConstModeC:
+            switch (Radix)
+            {
+              case 16:
+                strprep(Dest, "0x");
+                break;
+              case 8:
+                strprep(Dest, "0");
+                break;
+            }
+            break;
+          case ConstModeWeird :
+            switch (Radix)
+            {
+              case 16:
+                strprep(Dest, "x'");
+                strcat(Dest, "'");
+                break;
+            }
+            break;
+        }
       break;
-     case TempFloat:
-      strcpy(Dest,FloatString(t->Contents.Float)); break;
-     case TempString:
-      strcpy(Dest,t->Contents.Ascii); break;
-     default: strcpy(Dest,"???");
-    END
-END
+    case TempFloat:
+      FloatString(Dest, DestLen, t->Contents.Float);
+      break;
+    case TempString:
+      TempResultToPlainString(Dest, t, DestLen);
+      break;
+    default:
+      strmaxcpy(Dest, "???", DestLen);
+  }
+}
 
 /****************************************************************************/
 /* Listingzaehler zuruecksetzen */
 
-        void ResetPageCounter(void)
-BEGIN
-   int z;
+void ResetPageCounter(void)
+{
+  int z;
 
-   for (z=0; z<=ChapMax; z++) PageCounter[z]=0;
-   LstCounter=0; ChapDepth=0;
-END
+  for (z = 0; z <= ChapMax; z++)
+    PageCounter[z] = 0;
+  LstCounter = 0;
+  ChapDepth = 0;
+}
 
 /*--------------------------------------------------------------------------*/
 /* eine neue Seite im Listing beginnen */
 
-        void NewPage(ShortInt Level, Boolean WithFF)
-BEGIN
-   ShortInt z;
-   String Header,s;
-   char Save;
+void NewPage(ShortInt Level, Boolean WithFF)
+{
+  ShortInt z;
+  String Header, s;
+  char Save;
 
-   if (ListOn==0) return;
+  if (ListOn == 0)
+    return;
 
-   LstCounter=0;
+  LstCounter = 0;
 
-   if (ChapDepth<(Byte) Level)
-    BEGIN
-     memmove(PageCounter+(Level-ChapDepth),PageCounter,(ChapDepth+1)*sizeof(Word));
-     for (z=0; z<=Level-ChapDepth; PageCounter[z++]=1);
-     ChapDepth=Level;
-    END
-   for (z=0; z<=Level-1; PageCounter[z++]=1);
-   PageCounter[Level]++;
+  if (ChapDepth < (Byte) Level)
+  {
+    memmove(PageCounter + (Level - ChapDepth), PageCounter, (ChapDepth + 1) * sizeof(Word));
+    for (z = 0; z <= Level - ChapDepth; PageCounter[z++] = 1);
+    ChapDepth = Level;
+  }
+  for (z = 0; z <= Level - 1; PageCounter[z++] = 1);
+  PageCounter[Level]++;
 
-   if (WithFF)
-    BEGIN
-     errno=0; fprintf(LstFile,"%c",Char_FF); ChkIO(10002);
-    END
+  if ((WithFF) && (!ListToNull))
+  {
+    errno = 0;
+    fprintf(LstFile, "%c", Char_FF);
+    ChkIO(ErrNum_ListWrError);
+  }
 
-   sprintf(Header," AS V%s%s%s",Version,getmessage(Num_HeadingFileNameLab),NamePart(SourceFile));
-   if ((strcmp(CurrFileName,"INTERNAL")!=0) AND (strcmp(NamePart(CurrFileName),NamePart(SourceFile))!=0))
-    BEGIN
-     strmaxcat(Header,"(",255);
-     strmaxcat(Header,NamePart(CurrFileName),255);
-     strmaxcat(Header,")",255);
-    END
-   strmaxcat(Header,getmessage(Num_HeadingPageLab),255);
+  as_snprintf(Header, sizeof(Header), " AS V%s%s%s",
+              Version,
+              getmessage(Num_HeadingFileNameLab),
+              NamePart(SourceFile));
+  if ((strcmp(CurrFileName, "INTERNAL"))
+   && (strcmp(NamePart(CurrFileName), NamePart(SourceFile))))
+  {
+    strmaxcat(Header, "(", STRINGSIZE);
+    strmaxcat(Header, NamePart(CurrFileName), STRINGSIZE);
+    strmaxcat(Header, ")", STRINGSIZE);
+  }
+  strmaxcat(Header, getmessage(Num_HeadingPageLab), STRINGSIZE);
 
-   for (z=ChapDepth; z>=0; z--)
-    BEGIN
-     sprintf(s, IntegerFormat, PageCounter[z]);
-     strmaxcat(Header,s,255);
-     if (z!=0) strmaxcat(Header,".",255);
-    END
+  for (z = ChapDepth; z >= 0; z--)
+  {
+    as_snprintf(s, sizeof(s), IntegerFormat, PageCounter[z]);
+    strmaxcat(Header, s, STRINGSIZE);
+    if (z != 0)
+      strmaxcat(Header, ".", STRINGSIZE);
+  }
 
-   strmaxcat(Header," - ",255);
-   NLS_CurrDateString(s); strmaxcat(Header,s,255);
-   strmaxcat(Header," ",255);
-   NLS_CurrTimeString(False,s); strmaxcat(Header,s,255);
+  strmaxcat(Header, " - ", STRINGSIZE);
+  NLS_CurrDateString(s, sizeof(s));
+  strmaxcat(Header, s, STRINGSIZE);
+  strmaxcat(Header, " ", STRINGSIZE);
+  NLS_CurrTimeString(False, s, sizeof(s));
+  strmaxcat(Header, s, STRINGSIZE);
 
-   if (PageWidth!=0)
-    while (strlen(Header)>PageWidth)
-     BEGIN
-      Save=Header[PageWidth]; Header[PageWidth]='\0';
-      errno=0; fprintf(LstFile,"%s\n",Header); ChkIO(10002); 
-      Header[PageWidth]=Save; strcpy(Header,Header+PageWidth);
-     END
-   errno=0; fprintf(LstFile,"%s\n",Header); ChkIO(10002);
+  if (PageWidth != 0)
+    while (strlen(Header) > PageWidth)
+    {
+      Save = Header[PageWidth];
+      Header[PageWidth] = '\0';
+      if (!ListToNull)
+      {
+        errno = 0;
+        fprintf(LstFile, "%s\n", Header);
+        ChkIO(ErrNum_ListWrError);
+      }
+      Header[PageWidth] = Save;
+      strmov(Header, Header + PageWidth);
+    }
 
-   if (PrtTitleString[0]!='\0')
-    BEGIN
-     errno=0; fprintf(LstFile,"%s\n",PrtTitleString); ChkIO(10002);
-    END
+  if (!ListToNull)
+  {
+    errno = 0;
+    fprintf(LstFile, "%s\n", Header);
+    ChkIO(ErrNum_ListWrError);
 
-   errno=0; fprintf(LstFile,"\n\n"); ChkIO(10002);
-END
+    if (PrtTitleString[0])
+    {
+      errno = 0;
+      fprintf(LstFile, "%s\n", PrtTitleString);
+      ChkIO(ErrNum_ListWrError);
+    }
+
+    errno = 0;
+    fprintf(LstFile, "\n\n");
+    ChkIO(ErrNum_ListWrError);
+  }
+}
 
 
 /*--------------------------------------------------------------------------*/
 /* eine Zeile ins Listing schieben */
 
-        void WrLstLine(char *Line)
-BEGIN
-   int LLength;
-   char bbuf[2500];
-   String LLine;
-   int blen=0,hlen,z,Start;
+void WrLstLine(const char *Line)
+{
+  int LLength;
+  char bbuf[2500];
+  String LLine;
+  int blen = 0, hlen, z, Start;
 
-   if (ListOn==0) return;
+  if ((ListOn == 0) || (ListToNull))
+    return;
 
-   if (PageLength==0)
-    BEGIN
-     errno=0; fprintf(LstFile,"%s\n",Line); ChkIO(10002);
-    END
-   else
-    BEGIN
-     if ((PageWidth==0) OR ((strlen(Line)<<3)<PageWidth)) LLength=1;
-     else
-      BEGIN
-       blen=0;
-       for (z=0; z<strlen(Line);  z++)
-        if (Line[z]==Char_HT)
-         BEGIN
-          memset(bbuf+blen,8-(blen&7),' ');
-          blen+=8-(blen&7);
-         END
-        else bbuf[blen++]=Line[z];
-       LLength=blen/PageWidth; if (blen%PageWidth!=0) LLength++;
-      END
-     if (LLength==1)
-      BEGIN
-       errno=0; fprintf(LstFile,"%s\n",Line); ChkIO(10002);
-       if ((++LstCounter)==PageLength) NewPage(0,True);
-      END
-     else
-      BEGIN
-       Start=0;
-       for (z=1; z<=LLength; z++)
-        BEGIN
-         hlen=PageWidth; if (blen-Start<hlen) hlen=blen-Start;
-         memcpy(LLine,bbuf+Start,hlen); LLine[hlen]='\0';
-         errno=0; fprintf(LstFile,"%s\n",LLine); 
-         if ((++LstCounter)==PageLength) NewPage(0,True);
-         Start+=hlen;
-        END
-      END
-    END
-END
+  if (PageLength == 0)
+  {
+    errno = 0;
+    fprintf(LstFile, "%s\n", Line);
+    ChkIO(ErrNum_ListWrError);
+  }
+  else
+  {
+    if ((PageWidth == 0) || ((strlen(Line) << 3) < PageWidth))
+      LLength = 1;
+    else
+    {
+      blen = 0;
+      for (z = 0; z < (int)strlen(Line);  z++)
+        if (Line[z] == Char_HT)
+        {
+          memset(bbuf + blen, ' ', 8 - (blen & 7));
+          blen += 8 - (blen&7);
+        }
+        else
+          bbuf[blen++] = Line[z];
+      LLength = blen / PageWidth;
+      if (blen % PageWidth)
+        LLength++;
+    }
+    if (LLength == 1)
+    {
+      errno = 0;
+      fprintf(LstFile, "%s\n", Line);
+      ChkIO(ErrNum_ListWrError);
+      if ((++LstCounter) == PageLength)
+        NewPage(0, True);
+    }
+    else
+    {
+      Start = 0;
+      for (z = 1; z <= LLength; z++)
+      {
+        hlen = PageWidth;
+        if (blen - Start < hlen)
+          hlen = blen - Start;
+        memcpy(LLine, bbuf + Start, hlen);
+        LLine[hlen] = '\0';
+        errno = 0;
+        fprintf(LstFile, "%s\n", LLine);
+        if ((++LstCounter) == PageLength)
+          NewPage(0, True);
+        Start += hlen;
+      }
+    }
+  }
+}
 
 /*****************************************************************************/
 /* Ausdruck in Spalte vor Listing */
 
+void SetListLineVal(TempResult *t)
+{
+  *ListLine = '=';
+  StrSym(t, True, ListLine + 1, STRINGSIZE - 1, ListRadixBase);
+  LimitListLine();
+}
 
-        void SetListLineVal(TempResult *t)
-BEGIN
-   StrSym(t,True,ListLine); strmaxprep(ListLine,"=",255);
-   if (strlen(ListLine)>14)
-    BEGIN
-     ListLine[12]='\0'; strmaxcat(ListLine,"..",255);
-    END
-END
+void LimitListLine(void)
+{
+  if (strlen(ListLine) + 1 > LISTLINESPACE)
+  {
+    ListLine[LISTLINESPACE - 4] = '\0';
+    strmaxcat(ListLine, "..", STRINGSIZE);
+  }
+}
+
+/*!------------------------------------------------------------------------
+ * \fn     PrintOneLineMuted(FILE *pFile, const char *pLine,
+                             const struct sLineComp *pMuteComponent,
+                             const struct sLineComp *pMuteComponent2)
+ * \brief  print a line, with a certain component muted out (i.e. replaced by spaces)
+ * \param  pFile where to write
+ * \param  pLine line to print
+ * \param  pMuteComponent component to mute in printout
+ * ------------------------------------------------------------------------ */
+
+static Boolean CompMatch(int Col, const struct sLineComp *pComp)
+{
+  return (pComp
+       && (pComp->StartCol >= 0)
+       && (Col >= pComp->StartCol)
+       && (Col < pComp->StartCol + (int)pComp->Len));
+}
+
+void PrintOneLineMuted(FILE *pFile, const char *pLine,
+                       const struct sLineComp *pMuteComponent,
+                       const struct sLineComp *pMuteComponent2)
+{
+  int z, Len = strlen(pLine);
+  Boolean Match;
+
+  errno = 0;
+  for (z = 0; z < Len; z++)
+  {
+    Match = CompMatch(z, pMuteComponent) || CompMatch(z, pMuteComponent2);
+    fputc(Match ? ' ' : pLine[z], pFile);
+  }
+  fputc('\n', pFile);
+  ChkIO(ErrNum_ListWrError);
+}
+
+/*!------------------------------------------------------------------------
+ * \fn     PrLineMarker(FILE *pFile, const char *pLine, const char *pPrefix, const char *pTrailer,
+                        char Marker, const struct sLineComp *pLineComp)
+ * \brief  print a line, optionally with a marking of a component below
+ * \param  pFile where to write
+ * \param  pLine line to print/underline
+ * \param  pPrefix what to print before (under)line
+ * \param  pTrailer what to print after (under)line
+ * \param  Marker character to use for marking
+ * \param  pLineComp position and length of optional marker
+ * ------------------------------------------------------------------------ */
+
+void PrLineMarker(FILE *pFile, const char *pLine, const char *pPrefix, const char *pTrailer,
+                  char Marker, const struct sLineComp *pLineComp)
+{
+  const char *pRun;
+  int z;
+
+  fputs(pPrefix, pFile);
+  for (pRun = pLine; *pRun; pRun++)
+    fputc(TabCompressed(*pRun), pFile);
+  fprintf(pFile, "%s\n", pTrailer);
+
+  if (pLineComp && (pLineComp->StartCol >= 0) && (pLineComp->Len > 0))
+  {
+    fputs(pPrefix, pFile);
+    if (pLineComp->StartCol > 0)
+      fprintf(pFile, "%*s", pLineComp->StartCol, "");
+    for (z = 0; z < (int)pLineComp->Len; z++)
+      fputc(Marker, pFile);
+    fprintf(pFile, "%s\n", pTrailer);
+  }
+}
 
 /****************************************************************************/
 /* einen Symbolnamen auf Gueltigkeit ueberpruefen */
 
-        Boolean ChkSymbName(char *sym)
-BEGIN
-   char *z;
+static Byte GetValidSymChar(unsigned Ch)
+{
+  return (Ch < ValidSymCharLen) ? ValidSymChar[Ch] : 0;
+}
 
-   if (*sym=='\0') return False;
-   if (NOT (isalpha((unsigned int) *sym) OR (*sym=='_') OR (*sym=='.'))) return False;
-   for (z=sym; *z!='\0'; z++)
-    if (NOT (isalnum((unsigned int) *z) OR (*z=='_') OR (*z=='.'))) return False;
-   return True;
-END
+static Boolean ChkName(const char *pSym, Byte _Mask)
+{
+  Byte Mask = _Mask;
+  unsigned Ch;
 
-        Boolean ChkMacSymbName(char *sym)
-BEGIN
-   char *z;
+  if (!*pSym)
+    return False;
 
-   if (*sym=='\0') return False;
-   if (NOT isalpha((unsigned int) *sym)) return False;
-   for (z=sym; *z!='\0'; z++)
-    if (NOT isalnum((unsigned int) *z)) return False;
-   return True;
-END
+  while (*pSym)
+  {
+    if (ValidSymCharLen > 256)
+      Ch = UTF8ToUnicode(&pSym);
+    else
+      Ch = ((unsigned int)*pSym++) & 0xff;
 
-/****************************************************************************/
-/* Fehlerkanal offen ? */
+    if (!(GetValidSymChar(Ch) & Mask))
+      return False;
+    Mask = _Mask << 1;
+  }
+  return True;
+}
 
-        static void ForceErrorOpen(void)
-BEGIN
-   if (NOT IsErrorOpen)
-    BEGIN
-     RewriteStandard(&ErrorFile,ErrorName); IsErrorOpen=True;
-     if (ErrorFile==Nil) ChkIO(10001);
-    END
-END
+Boolean ChkSymbName(const char *pSym)
+{
+  return ChkName(pSym, VALID_S1);
+}
 
-/*--------------------------------------------------------------------------*/
-/* eine Fehlermeldung  mit Klartext ausgeben */
+Boolean ChkMacSymbName(const char *pSym)
+{
+  return ChkName(pSym, VALID_M1);
+}
 
-	static void EmergencyStop(void)
-BEGIN
-   if ((IsErrorOpen) AND (ErrorFile!=Nil)) fclose(ErrorFile);
-   fclose(LstFile);
-   if (ShareMode!=0)
-    BEGIN
-     fclose(ShareFile); unlink(ShareName);
-    END
-   if (MacProOutput)
-    BEGIN
-     fclose(MacProFile); unlink(MacProName);
-    END
-   if (MacroOutput)
-    BEGIN
-     fclose(MacroFile); unlink(MacroName);
-    END
-   if (MakeDebug) fclose(Debug);
-   if (CodeOutput)
-    BEGIN
-     fclose(PrgFile); unlink(OutName);
-    END
-END
+/*!------------------------------------------------------------------------
+ * \fn     visible_strlen(const char *pSym)
+ * \brief  retrieve 'visible' length of string, regarding multi-by sequences for UTF-8
+ * \param  pSym symbol name
+ * \return visible length in characters
+ * ------------------------------------------------------------------------ */
 
-        void WrErrorString(char *Message, char *Add, Boolean Warning, Boolean Fatal)
-BEGIN
-   String h,h2;
-   char *p;
-   FILE *errfile;
+unsigned visible_strlen(const char *pSym)
+{
+  if (ValidSymCharLen > 256)
+  {
+    unsigned Result = 0;
 
-   strcpy(h,"> > >");
-   strmaxcat(h,p=GetErrorPos(),255); free(p);
-   if (NOT Warning)
-    BEGIN
-     strmaxcat(h,getmessage(Num_ErrName),255);
-     strmaxcat(h,Add,255);
-     strmaxcat(h,": ",255);
-     ErrorCount++;
-    END
-   else
-    BEGIN
-     strmaxcat(h,getmessage(Num_WarnName),255);
-     strmaxcat(h,Add,255);
-     strmaxcat(h,": ",255);
-     WarnCount++;
-    END
-
-   if ((strcmp(LstName, "/dev/null") != 0) AND (NOT Fatal))
-    BEGIN
-     strmaxcpy(h2, h, 255); strmaxcat(h2, Message, 255); WrLstLine(h2);
-     if ((ExtendErrors > 0) AND (*ExtendError != '\0'))
-      BEGIN
-       sprintf(h2, "> > > %s", ExtendError); WrLstLine(h2);
-      END
-     if (ExtendErrors > 1)
-      BEGIN
-       sprintf(h2, "> > > %s", OneLine); WrLstLine(h2);
-      END
-    END
-
-   ForceErrorOpen();
-   if ((strcmp(LstName, "!1")!=0) OR (Fatal))
-    BEGIN
-     errfile = (ErrorFile == Nil) ? stdout : ErrorFile;
-     fprintf(errfile, "%s%s%s\n", h, Message, ClrEol);
-     if ((ExtendErrors > 0) AND (*ExtendError != '\0'))
-      fprintf(errfile, "> > > %s%s\n", ExtendError, ClrEol);
-     if (ExtendErrors > 1)
-      fprintf(errfile, "> > > %s%s\n", OneLine, ClrEol);
-    END
-   *ExtendError = '\0';
-
-   if (Fatal)
-    BEGIN
-     fprintf((ErrorFile==Nil)?stdout:ErrorFile,"%s\n",getmessage(Num_ErrMsgIsFatal));
-     EmergencyStop();
-     exit(3);
-    END
-END
-
-/*--------------------------------------------------------------------------*/
-/* eine Fehlermeldung ueber Code ausgeben */
-
-        static void WrErrorNum(Word Num)
-BEGIN
-   String h;
-   char Add[11];
-   int msgno;
-   
-   if ((NOT CodeOutput) AND (Num==1200)) return;
-
-   if ((SuppWarns) AND (Num<1000)) return;
-
-   switch (Num)
-    BEGIN
-     case    0: msgno=Num_ErrMsgUselessDisp; break;
-     case   10: msgno=Num_ErrMsgShortAddrPossible; break;
-     case   20: msgno=Num_ErrMsgShortJumpPossible; break;
-     case   30: msgno=Num_ErrMsgNoShareFile; break;
-     case   40: msgno=Num_ErrMsgBigDecFloat; break;
-     case   50: msgno=Num_ErrMsgPrivOrder; break;
-     case   60: msgno=Num_ErrMsgDistNull; break;
-     case   70: msgno=Num_ErrMsgWrongSegment; break;
-     case   75: msgno=Num_ErrMsgInAccSegment; break;
-     case   80: msgno=Num_ErrMsgPhaseErr; break;
-     case   90: msgno=Num_ErrMsgOverlap; break;
-     case  100: msgno=Num_ErrMsgNoCaseHit; break;
-     case  110: msgno=Num_ErrMsgInAccPage; break;
-     case  120: msgno=Num_ErrMsgRMustBeEven; break;
-     case  130: msgno=Num_ErrMsgObsolete; break;
-     case  140: msgno=Num_ErrMsgUnpredictable; break;
-     case  150: msgno=Num_ErrMsgAlphaNoSense; break;
-     case  160: msgno=Num_ErrMsgSenseless; break;
-     case  170: msgno=Num_ErrMsgRepassUnknown; break;
-     case  180: msgno=Num_ErrMsgAddrNotAligned; break;
-     case  190: msgno=Num_ErrMsgIOAddrNotAllowed; break;
-     case  200: msgno=Num_ErrMsgPipeline; break;
-     case  210: msgno=Num_ErrMsgDoubleAdrRegUse; break;
-     case  220: msgno=Num_ErrMsgNotBitAddressable; break;
-     case  230: msgno=Num_ErrMsgStackNotEmpty; break;
-     case  240: msgno=Num_ErrMsgNULCharacter; break;
-     case  250: msgno=Num_ErrMsgPageCrossing; break;
-     case  260: msgno=Num_ErrMsgWOverRange; break;
-     case  270: msgno=Num_ErrMsgNegDUP; break;
-     case 1000: msgno=Num_ErrMsgDoubleDef; break;
-     case 1010: msgno=Num_ErrMsgSymbolUndef; break;
-     case 1020: msgno=Num_ErrMsgInvSymName; break;
-     case 1090: msgno=Num_ErrMsgInvFormat; break;
-     case 1100: msgno=Num_ErrMsgUseLessAttr; break;
-     case 1105: msgno=Num_ErrMsgTooLongAttr; break;
-     case 1107: msgno=Num_ErrMsgUndefAttr; break;
-     case 1110: msgno=Num_ErrMsgWrongArgCnt; break;
-     case 1115: msgno=Num_ErrMsgWrongOptCnt; break;
-     case 1120: msgno=Num_ErrMsgOnlyImmAddr; break;
-     case 1130: msgno=Num_ErrMsgInvOpsize; break;
-     case 1131: msgno=Num_ErrMsgConfOpSizes; break;
-     case 1132: msgno=Num_ErrMsgUndefOpSizes; break;
-     case 1135: msgno=Num_ErrMsgInvOpType; break;
-     case 1140: msgno=Num_ErrMsgTooMuchArgs; break;
-     case 1150: msgno=Num_ErrMsgNoRelocs; break;
-     case 1155: msgno=Num_ErrMsgUnresRelocs; break;
-     case 1200: msgno=Num_ErrMsgUnknownOpcode; break;
-     case 1300: msgno=Num_ErrMsgBrackErr; break;
-     case 1310: msgno=Num_ErrMsgDivByZero; break;
-     case 1315: msgno=Num_ErrMsgUnderRange; break;
-     case 1320: msgno=Num_ErrMsgOverRange; break;
-     case 1325: msgno=Num_ErrMsgNotAligned; break;
-     case 1330: msgno=Num_ErrMsgDistTooBig; break;
-     case 1335: msgno=Num_ErrMsgInAccReg; break;
-     case 1340: msgno=Num_ErrMsgNoShortAddr; break;
-     case 1350: msgno=Num_ErrMsgInvAddrMode; break;
-     case 1351: msgno=Num_ErrMsgMustBeEven; break;
-     case 1355: msgno=Num_ErrMsgInvParAddrMode; break;
-     case 1360: msgno=Num_ErrMsgUndefCond; break;
-     case 1370: msgno=Num_ErrMsgJmpDistTooBig; break;
-     case 1375: msgno=Num_ErrMsgDistIsOdd; break;
-     case 1380: msgno=Num_ErrMsgInvShiftArg; break;
-     case 1390: msgno=Num_ErrMsgRange18; break;
-     case 1400: msgno=Num_ErrMsgShiftCntTooBig; break;
-     case 1410: msgno=Num_ErrMsgInvRegList; break;
-     case 1420: msgno=Num_ErrMsgInvCmpMode; break;
-     case 1430: msgno=Num_ErrMsgInvCPUType; break;
-     case 1440: msgno=Num_ErrMsgInvCtrlReg; break;
-     case 1445: msgno=Num_ErrMsgInvReg; break;
-     case 1450: msgno=Num_ErrMsgNoSaveFrame; break;
-     case 1460: msgno=Num_ErrMsgNoRestoreFrame; break;
-     case 1465: msgno=Num_ErrMsgUnknownMacArg; break;
-     case 1470: msgno=Num_ErrMsgMissEndif; break;
-     case 1480: msgno=Num_ErrMsgInvIfConst; break;
-     case 1483: msgno=Num_ErrMsgDoubleSection; break;
-     case 1484: msgno=Num_ErrMsgInvSection; break;
-     case 1485: msgno=Num_ErrMsgMissingEndSect; break;
-     case 1486: msgno=Num_ErrMsgWrongEndSect; break;
-     case 1487: msgno=Num_ErrMsgNotInSection; break;
-     case 1488: msgno=Num_ErrMsgUndefdForward; break;
-     case 1489: msgno=Num_ErrMsgContForward; break;
-     case 1490: msgno=Num_ErrMsgInvFuncArgCnt; break;
-     case 1495: msgno=Num_ErrMsgMissingLTORG; break;
-     case 1500: msgno= -1;
-                sprintf(h,"%s%s%s",getmessage(Num_ErrMsgNotOnThisCPU1), 
-                        MomCPUIdent,getmessage(Num_ErrMsgNotOnThisCPU2));
-                break;
-     case 1505: msgno= -1;
-                sprintf(h,"%s%s%s",getmessage(Num_ErrMsgNotOnThisCPU3),
-                        MomCPUIdent,getmessage(Num_ErrMsgNotOnThisCPU2));
-                break;
-     case 1510: msgno=Num_ErrMsgInvBitPos; break;
-     case 1520: msgno=Num_ErrMsgOnlyOnOff; break;
-     case 1530: msgno=Num_ErrMsgStackEmpty; break;
-     case 1540: msgno=Num_ErrMsgNotOneBit; break;
-     case 1550: msgno=Num_ErrMsgMissingStruct; break;
-     case 1551: msgno=Num_ErrMsgOpenStruct; break;
-     case 1552: msgno=Num_ErrMsgWrongStruct; break;
-     case 1553: msgno=Num_ErrMsgPhaseDisallowed; break;
-     case 1554: msgno=Num_ErrMsgInvStructDir; break;
-     case 1600: msgno=Num_ErrMsgShortRead; break;
-     case 1610: msgno=Num_ErrMsgUnknownCodepage; break;
-     case 1700: msgno=Num_ErrMsgRomOffs063; break;
-     case 1710: msgno=Num_ErrMsgInvFCode; break;
-     case 1720: msgno=Num_ErrMsgInvFMask; break;
-     case 1730: msgno=Num_ErrMsgInvMMUReg; break;
-     case 1740: msgno=Num_ErrMsgLevel07; break;
-     case 1750: msgno=Num_ErrMsgInvBitMask; break;
-     case 1760: msgno=Num_ErrMsgInvRegPair; break;
-     case 1800: msgno=Num_ErrMsgOpenMacro; break;
-     case 1805: msgno=Num_ErrMsgEXITMOutsideMacro; break;
-     case 1810: msgno=Num_ErrMsgTooManyMacParams; break;
-     case 1815: msgno=Num_ErrMsgDoubleMacro; break;
-     case 1820: msgno=Num_ErrMsgFirstPassCalc; break;
-     case 1830: msgno=Num_ErrMsgTooManyNestedIfs; break;
-     case 1840: msgno=Num_ErrMsgMissingIf; break;
-     case 1850: msgno=Num_ErrMsgRekMacro; break;
-     case 1860: msgno=Num_ErrMsgUnknownFunc; break;
-     case 1870: msgno=Num_ErrMsgInvFuncArg; break;
-     case 1880: msgno=Num_ErrMsgFloatOverflow; break;
-     case 1890: msgno=Num_ErrMsgInvArgPair; break;
-     case 1900: msgno=Num_ErrMsgNotOnThisAddress; break;
-     case 1905: msgno=Num_ErrMsgNotFromThisAddress; break;
-     case 1910: msgno=Num_ErrMsgTargOnDiffPage; break;
-     case 1920: msgno=Num_ErrMsgCodeOverflow; break;
-     case 1925: msgno=Num_ErrMsgAdrOverflow; break;
-     case 1930: msgno=Num_ErrMsgMixDBDS; break;
-     case 1940: msgno=Num_ErrMsgNotInStruct; break;
-     case 1950: msgno=Num_ErrMsgParNotPossible; break;
-     case 1960: msgno=Num_ErrMsgInvSegment; break;
-     case 1961: msgno=Num_ErrMsgUnknownSegment; break;
-     case 1962: msgno=Num_ErrMsgUnknownSegReg; break;
-     case 1970: msgno=Num_ErrMsgInvString; break;
-     case 1980: msgno=Num_ErrMsgInvRegName; break;
-     case 1985: msgno=Num_ErrMsgInvArg; break;
-     case 1990: msgno=Num_ErrMsgNoIndir; break;
-     case 1995: msgno=Num_ErrMsgNotInThisSegment; break;
-     case 1996: msgno=Num_ErrMsgNotInMaxmode; break;
-     case 1997: msgno=Num_ErrMsgOnlyInMaxmode; break;
-     case 10001: msgno=Num_ErrMsgOpeningFile; break;
-     case 10002: msgno=Num_ErrMsgListWrError; break;
-     case 10003: msgno=Num_ErrMsgFileReadError; break;
-     case 10004: msgno=Num_ErrMsgFileWriteError; break;
-     case 10006: msgno=Num_ErrMsgHeapOvfl; break;
-     case 10007: msgno=Num_ErrMsgStackOvfl; break;
-     default  : msgno= -1;
-                sprintf(h,"%s %d",getmessage(Num_ErrMsgIntError),(int) Num);
-    END
-   if (msgno!=-1) strmaxcpy(h,getmessage(msgno),255);   
-
-   if (((Num==1910) OR (Num==1370)) AND (NOT Repass)) JmpErrors++;
-
-   if (NumericErrors) sprintf(Add,"#%d", (int)Num); 
-   else *Add='\0';
-   WrErrorString(h,Add,Num<1000,Num>=10000);
-END
-
-        void WrError(Word Num)
-BEGIN
-   *ExtendError='\0'; WrErrorNum(Num);
-END
-
-        void WrXError(Word Num, char *Message)
-BEGIN
-   strmaxcpy(ExtendError,Message,255); WrErrorNum(Num);
-END
-
-/*--------------------------------------------------------------------------*/
-/* I/O-Fehler */
-
-        void ChkIO(Word ErrNo)
-BEGIN
-   int io;
-
-   io=errno; if ((io == 0) OR (io == 19) OR (io == 25)) return;
-
-   WrXError(ErrNo,GetErrorMsg(io));
-END
-
-/*--------------------------------------------------------------------------*/
-/* Bereichsfehler */
-
-        Boolean ChkRange(LargeInt Value, LargeInt Min, LargeInt Max)
-BEGIN
-   char s1[100],s2[100];
-
-   if (Value<Min)
-    BEGIN
-     strmaxcpy(s1,LargeString(Value),99); 
-     strmaxcpy(s2,LargeString(Min),99);
-     strmaxcat(s1,"<",99); strmaxcat(s1,s2,99);
-     WrXError(1315,s1); return False;
-    END
-   else if (Value>Max)
-    BEGIN
-     strmaxcpy(s1,LargeString(Value),99);
-     strmaxcpy(s2,LargeString(Max),99);
-     strmaxcat(s1,">",99); strmaxcat(s1,s2,99);
-     WrXError(1320,s1); return False;
-    END
-   else return True;
-END
+    while (*pSym)
+    {
+      (void)UTF8ToUnicode(&pSym);
+      Result++;
+    }
+    return Result;
+  }
+  else
+    return strlen(pSym);
+}
 
 /****************************************************************************/
 
-        LargeWord ProgCounter(void)
-BEGIN
-   return PCs[ActPC];
-END
+LargeWord ProgCounter(void)
+{
+  return PCs[ActPC];
+}
 
 /*--------------------------------------------------------------------------*/
 /* aktuellen Programmzaehler mit Phasenverschiebung holen */
 
-        LargeWord EProgCounter(void)
-BEGIN
-   return PCs[ActPC]+Phases[ActPC];
-END
-
+LargeWord EProgCounter(void)
+{
+  return PCs[ActPC] + Phases[ActPC];
+}
 
 /*--------------------------------------------------------------------------*/
 /* Granularitaet des aktuellen Segments holen */
 
-        Word Granularity(void)
-BEGIN
-   return Grans[ActPC];
-END
+Word Granularity(void)
+{
+  return Grans[ActPC];
+}
 
 /*--------------------------------------------------------------------------*/
 /* Linstingbreite des aktuellen Segments holen */
 
-        Word ListGran(void)
-BEGIN
-   return ListGrans[ActPC];
-END
+Word ListGran(void)
+{
+  return ListGrans[ActPC];
+}
 
 /*--------------------------------------------------------------------------*/
 /* pruefen, ob alle Symbole einer Formel im korrekten Adressraum lagen */
 
-        void ChkSpace(Byte Space)
-BEGIN
-   Byte Mask=0xff-(1<<Space);
+void ChkSpace(Byte AddrSpace, unsigned AddrSpaceMask)
+{
+  AddrSpaceMask &= ~(1 << AddrSpace);
 
-   if ((TypeFlag&Mask)!=0) WrError(70);
-END
+  if (AddrSpaceMask) WrError(ErrNum_WrongSegment);
+}
 
 /****************************************************************************/
 /* eine Chunkliste im Listing ausgeben & Speicher loeschen */
 
-        void PrintChunk(ChunkList *NChunk)
-BEGIN
-   LargeWord NewMin,FMin;
-   Boolean Found;
-   Word p=0,z;
-   int BufferZ;
-   String BufferS;
+void PrintChunk(ChunkList *NChunk, DissectBitProc Dissect, int ItemsPerLine)
+{
+  LargeWord NewMin, FMin;
+  Boolean Found;
+  Word p = 0, z;
+  int BufferZ;
+  String BufferS;
+  int MaxItemLen = 79 / ItemsPerLine;
 
-   NewMin=0; BufferZ=0; *BufferS='\0';
+  NewMin = 0;
+  BufferZ = 0;
+  *BufferS = '\0';
 
-   do  
-    BEGIN 
-     /* niedrigsten Start finden, der ueberhalb des letzten Endes liegt */
-     Found=False;
-#ifdef __STDC__
-     FMin=0xffffffffu;
-#else
-     FMin=0xffffffff;
-#endif
-     for (z=0; z<NChunk->RealLen; z++)
-      if (NChunk->Chunks[z].Start>=NewMin)
-       if (FMin>NChunk->Chunks[z].Start)
-        BEGIN
-         Found=True; FMin=NChunk->Chunks[z].Start; p=z;
-        END
+  do
+  {
+    /* niedrigsten Start finden, der ueberhalb des letzten Endes liegt */
 
-     if (Found)
-      BEGIN
-       strmaxcat(BufferS,HexString(NChunk->Chunks[p].Start,0),255);
-       if (NChunk->Chunks[p].Length!=1)
-        BEGIN 
-         strmaxcat(BufferS,"-",255);
-         strmaxcat(BufferS,HexString(NChunk->Chunks[p].Start+NChunk->Chunks[p].Length-1,0),255);
-        END
-       strmaxcat(BufferS,Blanks(19-strlen(BufferS)%19),255);
-       if (++BufferZ==4)
-        BEGIN
-         WrLstLine(BufferS); *BufferS='\0'; BufferZ=0;
-        END
-       NewMin=NChunk->Chunks[p].Start+NChunk->Chunks[p].Length;
-      END
-    END
-   while (Found);
+    Found = False;
+    FMin = IntTypeDefs[LargeWordType].Max;
+    for (z = 0; z < NChunk->RealLen; z++)
+      if (NChunk->Chunks[z].Start >= NewMin)
+        if (FMin > NChunk->Chunks[z].Start)
+        {
+          Found = True;
+          FMin = NChunk->Chunks[z].Start;
+          p = z;
+        }
 
-   if (BufferZ!=0) WrLstLine(BufferS);
-END
+    if (Found)
+    {
+      char Num[30];
+
+      Dissect(Num, sizeof(Num), NChunk->Chunks[p].Start);
+      strmaxcat(BufferS, Num, STRINGSIZE);
+      if (NChunk->Chunks[p].Length != 1)
+      {
+        strmaxcat(BufferS, "-", STRINGSIZE);
+        Dissect(Num, sizeof(Num), NChunk->Chunks[p].Start + NChunk->Chunks[p].Length - 1);
+        strmaxcat(BufferS, Num, STRINGSIZE);
+      }
+      strmaxcat(BufferS, Blanks(MaxItemLen - strlen(BufferS) % MaxItemLen), STRINGSIZE);
+      if (++BufferZ == ItemsPerLine)
+      {
+        WrLstLine(BufferS);
+        *BufferS = '\0';
+        BufferZ = 0;
+      }
+      NewMin = NChunk->Chunks[p].Start + NChunk->Chunks[p].Length;
+    }
+  }
+  while (Found);
+
+  if (BufferZ != 0)
+    WrLstLine(BufferS);
+}
 
 /*--------------------------------------------------------------------------*/
 /* Listen ausgeben */
 
-        void PrintUseList(void)
-BEGIN
-   int z,z2,l;
-   String s;
+void PrintUseList(void)
+{
+  int z, z2, l;
+  String s;
 
-   for (z=1; z<=PCMax; z++)
-    if (SegChunks[z].Chunks!=Nil)
-     BEGIN
-      sprintf(s,"  %s%s%s",getmessage(Num_ListSegListHead1),SegNames[z],
-                           getmessage(Num_ListSegListHead2));
+  for (z = 1; z <= PCMax; z++)
+    if (SegChunks[z].Chunks)
+    {
+      as_snprintf(s, sizeof(s), "  %s%s%s",
+                  getmessage(Num_ListSegListHead1), SegNames[z],
+                  getmessage(Num_ListSegListHead2));
       WrLstLine(s);
-      strcpy(s,"  ");
-      l=strlen(SegNames[z])+strlen(getmessage(Num_ListSegListHead1))+strlen(getmessage(Num_ListSegListHead2));
-      for (z2=0; z2<l; z2++) strmaxcat(s,"-",255);
+      strcpy(s, "  ");
+      l = strlen(SegNames[z]) + strlen(getmessage(Num_ListSegListHead1)) + strlen(getmessage(Num_ListSegListHead2));
+      for (z2 = 0; z2 < l; z2++)
+        strmaxcat(s, "-", STRINGSIZE);
       WrLstLine(s);
       WrLstLine("");
-      PrintChunk(SegChunks+z);
+      PrintChunk(SegChunks + z,
+                 (z == SegBData) ? DissectBit : Default_DissectBit,
+                 (z == SegBData) ? 3 : 4);
       WrLstLine("");
-     END
-END
+    }
+}
 
-        void ClearUseList(void)
-BEGIN
-   int z;
+void ClearUseList(void)
+{
+  int z;
 
-   for (z=1; z<=PCMax; z++)
-    ClearChunk(SegChunks+z);
-END
+  for (z = 1; z <= PCMax; z++)
+    ClearChunk(SegChunks + z);
+}
 
 /****************************************************************************/
 /* Include-Pfadlistenverarbeitung */
 
-        static char *GetPath(char *Acc)
-BEGIN
-   char *p;
-   static String tmp;
+static char *GetPath(char *Acc)
+{
+  char *p;
+  static String tmp;
 
-   p=strchr(Acc,DIRSEP);
-   if (p==Nil)
-    BEGIN
-     strmaxcpy(tmp,Acc,255); Acc[0]='\0';
-    END
-   else
-    BEGIN
-     *p='\0'; strmaxcpy(tmp,Acc,255); strcpy(Acc,p+1);
-    END
-   return tmp;
-END
+  p = strchr(Acc, DIRSEP);
+  if (!p)
+  {
+    strmaxcpy(tmp, Acc, STRINGSIZE);
+    Acc[0] = '\0';
+  }
+  else
+  {
+    *p = '\0';
+    strmaxcpy(tmp, Acc, STRINGSIZE);
+    strmov(Acc, p + 1);
+  }
+  return tmp;
+}
 
-        void AddIncludeList(char *NewPath)
-BEGIN
-   String Test;
+void AddIncludeList(char *NewPath)
+{
+  String Test;
 
-   strmaxcpy(Test,IncludeList,255);
-   while (*Test!='\0')
-    if (strcmp(GetPath(Test),NewPath)==0) return;
-   if (*IncludeList!='\0') strmaxprep(IncludeList,SDIRSEP,255);
-   strmaxprep(IncludeList,NewPath,255);
-END
+  strmaxcpy(Test, IncludeList, STRINGSIZE);
+  while (*Test != '\0')
+    if (!strcmp(GetPath(Test), NewPath))
+      return;
+  if (*IncludeList != '\0')
+    strmaxprep(IncludeList, SDIRSEP, STRINGSIZE);
+  strmaxprep(IncludeList, NewPath, STRINGSIZE);
+}
 
 
-        void RemoveIncludeList(char *RemPath)
-BEGIN
-   String Save;
-   char *Part;
+void RemoveIncludeList(char *RemPath)
+{
+  String Save;
+  char *Part;
 
-   strmaxcpy(IncludeList,Save,255); IncludeList[0]='\0';
-   while (Save[0]!='\0')
-    BEGIN
-     Part=GetPath(Save);
-     if (strcmp(Part,RemPath)!=0)
-      BEGIN
-       if (IncludeList[0]!='\0') strmaxcat(IncludeList,SDIRSEP,255);
-       strmaxcat(IncludeList,Part,255);
-      END
-    END
-END
+  strmaxcpy(IncludeList, Save, STRINGSIZE);
+  IncludeList[0] = '\0';
+  while (Save[0] != '\0')
+  {
+    Part = GetPath(Save);
+    if (strcmp(Part, RemPath))
+    {
+      if (IncludeList[0] != '\0')
+        strmaxcat(IncludeList, SDIRSEP, STRINGSIZE);
+      strmaxcat(IncludeList, Part, STRINGSIZE);
+    }
+  }
+}
 
 /****************************************************************************/
-/* Liste mit Ausgabedateien */
+/* Listen mit Ausgabedateien */
 
-        void ClearOutList(void)
-BEGIN
-   ClearStringList(&OutList);
-END
+void ClearOutList(void)
+{
+  ClearStringList(&OutList);
+}
 
-        void AddToOutList(char *NewName)
-BEGIN
-   AddStringListLast(&OutList,NewName);
-END
+void AddToOutList(const char *NewName)
+{
+  AddStringListLast(&OutList, NewName);
+}
 
-        void RemoveFromOutList(char *OldName)
-BEGIN
-   RemoveStringList(&OutList,OldName);
-END
+void RemoveFromOutList(const char *OldName)
+{
+  RemoveStringList(&OutList, OldName);
+}
 
-        char *GetFromOutList(void)
-BEGIN
-   return GetAndCutStringList(&OutList);
-END
+char *GetFromOutList(void)
+{
+  return GetAndCutStringList(&OutList);
+}
 
-        void ClearShareOutList(void)
-BEGIN
-   ClearStringList(&ShareOutList);
-END
+void ClearShareOutList(void)
+{
+  ClearStringList(&ShareOutList);
+}
 
-        void AddToShareOutList(char *NewName)
-BEGIN
-   AddStringListLast(&ShareOutList,NewName);
-END
+void AddToShareOutList(const char *NewName)
+{
+  AddStringListLast(&ShareOutList, NewName);
+}
 
-        void RemoveFromShareOutList(char *OldName)
-BEGIN
-   RemoveStringList(&ShareOutList,OldName);
-END
+void RemoveFromShareOutList(const char *OldName)
+{
+  RemoveStringList(&ShareOutList, OldName);
+}
 
-        char *GetFromShareOutList(void)
-BEGIN
-   return GetAndCutStringList(&ShareOutList);
-END
+char *GetFromShareOutList(void)
+{
+  return GetAndCutStringList(&ShareOutList);
+}
+
+void ClearListOutList(void)
+{
+  ClearStringList(&ListOutList);
+}
+
+void AddToListOutList(const char *NewName)
+{
+  AddStringListLast(&ListOutList, NewName);
+}
+
+void RemoveFromListOutList(const char *OldName)
+{
+  RemoveStringList(&ListOutList, OldName);
+}
+
+char *GetFromListOutList(void)
+{
+  return GetAndCutStringList(&ListOutList);
+}
 
 /****************************************************************************/
 /* Tokenverarbeitung */
 
-	static Boolean CompressLine_NErl(char ch)
-BEGIN
-   return (((ch>='A') AND (ch<='Z')) OR ((ch>='a') AND (ch<='z')) OR ((ch>='0') AND (ch<='9')));
-END
+static Boolean CompressLine_NErl(char ch)
+{
+  return (((ch >= 'A') && (ch <= 'Z'))
+       || ((ch >= 'a') && (ch <= 'z'))
+       || ((ch >= '0') && (ch <= '9')));
+}
 
-        void CompressLine(char *TokNam, Byte Num, char *Line)
-BEGIN
-   int z,e,tlen,llen;
-   Boolean SFound;
+static char Token[3] = { 0x01, 0x00, 0x00 };
+typedef int (*tCompareFnc)(const char *s1, const char *s2, size_t n);
 
-   z=0; tlen=strlen(TokNam); llen=strlen(Line);
-   while (z<=llen-tlen)
-    BEGIN
-     e=z+strlen(TokNam); 
-     SFound=(CaseSensitive) ? (strncmp(Line+z,TokNam,tlen)==0)
-                            : (strncasecmp(Line+z,TokNam,tlen)==0);
-     if  ( (SFound) 
-     AND   ((z==0) OR (NOT CompressLine_NErl(Line[z-1])))
-     AND   ((e>=strlen(Line)) OR (NOT CompressLine_NErl(Line[e]))) )
-      BEGIN
-       strcpy(Line+z+1,Line+e); Line[z]=Num;
-       llen=strlen(Line);
-      END;
-     z++; 
-    END
-END
+int ReplaceLine(char *pStr, unsigned StrSize, const char *pSearch, const char *pReplace, Boolean CaseSensitive)
+{
+  int SearchLen = strlen(pSearch), ReplaceLen = strlen(pReplace), StrLen = strlen(pStr), DeltaLen = ReplaceLen - SearchLen;
+  int NumReplace = 0, Pos, End, CmpRes, Avail, nCopy, nMove;
+  tCompareFnc Compare = CaseSensitive ? strncmp : as_strncasecmp;
 
-        void ExpandLine(char *TokNam, Byte Num, char *Line)
-BEGIN
-    char *z;
+  Pos = 0;
+  while (Pos <= StrLen - SearchLen)
+  {
+    End = Pos + SearchLen;
+    CmpRes = Compare(&pStr[Pos], pSearch, SearchLen);
+    if ((!CmpRes)
+     && ((Pos == 0) || (!CompressLine_NErl(pStr[Pos - 1])))
+     && ((End >= StrLen) || (!CompressLine_NErl(pStr[End]))))
+    {
+      Avail = StrSize - 1 - Pos;
+      nCopy = ReplaceLen; if (nCopy > Avail) nCopy = Avail;
+      Avail -= nCopy;
+      nMove = StrLen - (Pos + SearchLen); if (nMove > Avail) nMove = Avail;
+      memmove(&pStr[Pos + nCopy], &pStr[Pos + SearchLen], nMove);
+      memcpy(&pStr[Pos], pReplace, nCopy);
+      pStr[Pos + nCopy + nMove] = '\0';
+      Pos += nCopy;
+      StrLen += DeltaLen;
+      NumReplace++;
+    }
+    else
+      Pos++;
+  }
+  return NumReplace;
+}
 
-    do
-     BEGIN
-      z=strchr(Line,Num);
-      if (z!=Nil)
-       BEGIN
-        strcpy(z,z+1); 
-        strmaxins(Line,TokNam,z-Line,255);
-       END
-     END
-    while (z!=0);
-END
+static void SetToken(unsigned TokenNum)
+{
+  Token[0] = (TokenNum >> 4) + 1;
+  Token[1] = (TokenNum & 15) + 1;
+}
 
-        void KillCtrl(char *Line)
-BEGIN
-   char *z;
-   
-   if (*(z=Line)=='\0') return;
-   do
-    BEGIN
-     if (*z=='\0');
-     else if (*z==Char_HT)
-      BEGIN
-       strcpy(z,z+1);
-       strprep(z,Blanks(8-((z-Line)%8)));
-      END
-     else if ((*z&0xe0)==0) *z=' ';
-     z++;
-    END
-   while (*z!='\0');
-END
+int CompressLine(const char *TokNam, unsigned TokenNum, char *Line, unsigned LineSize, Boolean ThisCaseSensitive)
+{
+  SetToken(TokenNum);
+  return ReplaceLine(Line, LineSize, TokNam, Token, ThisCaseSensitive);
+}
+
+void ExpandLine(const char *TokNam, unsigned TokenNum, char *Line, unsigned LineSize)
+{
+  SetToken(TokenNum);
+  (void)ReplaceLine(Line, LineSize, Token, TokNam, True);
+}
+
+void KillCtrl(char *Line)
+{
+  char *z;
+
+  if (*(z = Line) == '\0')
+    return;
+  do
+  {
+    if (*z == '\0');
+    else if (*z == Char_HT)
+    {
+      strmov(z, z + 1);
+      strprep(z, Blanks(8 - ((z - Line) % 8)));
+    }
+    else if ((*z & 0xe0) == 0)
+      *z = ' ';
+    z++;
+  }
+  while (*z != '\0');
+}
 
 /****************************************************************************/
 /* Buchhaltung */
 
-	void BookKeeping(void)
-BEGIN
-   if (MakeUseList)
-    if (AddChunk(SegChunks+ActPC,ProgCounter(),CodeLen,ActPC==SegCode)) WrError(90);
-   if (DebugMode!=DebugNone)
-    BEGIN
-     AddSectionUsage(ProgCounter(),CodeLen);
-     AddLineInfo(InMacroFlag,CurrLine,CurrFileName,ActPC,PCs[ActPC],CodeLen);
-    END
-END
+void BookKeeping(void)
+{
+  if (MakeUseList)
+    if (AddChunk(SegChunks + ActPC, ProgCounter(), CodeLen, ActPC == SegCode))
+      WrError(ErrNum_Overlap);
+  if (DebugMode != DebugNone)
+  {
+    AddSectionUsage(ProgCounter(), CodeLen);
+    AddLineInfo(InMacroFlag, CurrLine, CurrFileName, ActPC, PCs[ActPC], CodeLen);
+  }
+}
 
 /****************************************************************************/
-/* Differenz zwischen zwei Zeiten mit Jahresueberlauf berechnen */
+/* Differenz zwischen zwei Zeiten mit Tagesueberlauf berechnen */
 
-        long DTime(long t1, long t2)
-BEGIN
-   LongInt d;
+long DTime(long t1, long t2)
+{
+  LongInt d;
 
-   d=t2-t1; if (d<0) d+=(24*360000);
-   return (d>0) ? d : -d;
-END
+  d = t2 - t1;
+  if (d < 0) d += (24*360000);
+  return (d > 0) ? d : -d;
+}
+
+/*--------------------------------------------------------------------------*/
+/* Init/Deinit passes */
+
+typedef struct sProcStore
+{
+  struct sProcStore *pNext;
+  SimpProc Proc;
+} tProcStore;
+
+static tProcStore *pInitPassProcStore = NULL,
+                  *pClearUpProcStore = NULL;
+
+void InitPass(void)
+{
+  tProcStore *pStore;
+
+  for (pStore = pInitPassProcStore; pStore; pStore = pStore->pNext)
+    pStore->Proc();
+}
+
+void ClearUp(void)
+{
+  tProcStore *pStore;
+
+  for (pStore = pClearUpProcStore; pStore; pStore = pStore->pNext)
+    pStore->Proc();
+}
+
+void AddInitPassProc(SimpProc NewProc)
+{
+  tProcStore *pNewStore = (tProcStore*)calloc(1, sizeof(*pNewStore));
+
+  pNewStore->pNext = pInitPassProcStore;
+  pNewStore->Proc = NewProc;
+  pInitPassProcStore = pNewStore;
+}
+
+void AddClearUpProc(SimpProc NewProc)
+{
+  tProcStore *pNewStore = (tProcStore*)calloc(1, sizeof(*pNewStore));
+
+  pNewStore->pNext = pClearUpProcStore;
+  pNewStore->Proc = NewProc;
+  pClearUpProcStore = pNewStore;
+}
 
 /*--------------------------------------------------------------------------*/
 /* Zeit holen */
@@ -1335,13 +1325,18 @@ END
 
 #include <dos.h>
 
-        long GTime(void)
-BEGIN
-   static unsigned long *tick=MK_FP(0x40,0x6c);
-   double tmp=*tick;
+long GTime(void)
+{
+  struct time tbuf;
+  long result;
 
-   return ((long) (tmp*5.4931641));
-END
+  gettime(&tbuf);
+  result = tbuf.ti_hour;
+  result = (result * 60) + tbuf.ti_min;
+  result = (result * 60) + tbuf.ti_sec;
+  result = (result * 100) + tbuf.ti_hund;
+  return result;
+}
 
 #elif __IBMC__
 
@@ -1349,178 +1344,358 @@ END
 #define INCL_DOSDATETIME
 #include <os2.h>
 
-        long GTime(void)
-BEGINM
-   DATETIME dt;
-   struct tm ts;
-   DosGetDateTime(&dt);
-   memset(&ts,0,sizeof(ts));
-   ts.tm_year = dt.year-1900;
-   ts.tm_mon  = dt.month-1;  
-   ts.tm_mday = dt.day;
-   ts.tm_hour = dt.hours;
-   ts.tm_min  = dt.minutes;
-   ts.tm_sec  = dt.seconds;
-   return (mktime(&ts)*100)+(dt.hundredths);
-END
+long GTime(void)
+{
+  DATETIME dt;
+  struct tm ts;
+  DosGetDateTime(&dt);
+  memset(&ts, 0, sizeof(ts));
+  ts.tm_year = dt.year - 1900;
+  ts.tm_mon  = dt.month - 1;
+  ts.tm_mday = dt.day;
+  ts.tm_hour = dt.hours;
+  ts.tm_min  = dt.minutes;
+  ts.tm_sec  = dt.seconds;
+  return (mktime(&ts) * 100) + (dt.hundredths);
+}
+
+#elif __MINGW32__
+
+/* distribution by Gunnar Wallmann */
+
+#include <sys/time.h>
+#include "math64.h"
+
+/*time from 1 Jan 1601 to 1 Jan 1970 in 100ns units */
+
+typedef struct _FILETIME
+{
+  unsigned long dwLowDateTime;
+  unsigned long dwHighDateTime;
+} FILETIME;
+
+void __stdcall GetSystemTimeAsFileTime(FILETIME*);
+
+long GTime(void)
+{
+  union
+  {
+#ifndef NOLONGLONG
+    long long ns100; /*time since 1 Jan 1601 in 100ns units */
+#endif
+    FILETIME ft;
+  } _now;
+
+  GetSystemTimeAsFileTime(&(_now.ft));
+#ifdef NOLONGLONG
+  {
+    static const t64 offs = { 0xd53e8000, 0x019db1de },
+                     div = { 100000, 0 };
+    t64 acc;
+
+    acc.low = _now.ft.dwLowDateTime;
+    acc.high = _now.ft.dwHighDateTime;
+    sub64(&acc, &acc, &offs);
+    div64(&acc, &acc, &div);
+    return acc.low;
+  }
+#else
+# define _W32_FT_OFFSET (116444736000000000LL)
+  return (_now.ns100 - _W32_FT_OFFSET) / 100000LL;
+#endif
+}
 
 #else
 
 #include <sys/time.h>
 
-        long GTime(void)
-BEGIN
-   struct timeval tv;
-  
-   gettimeofday(&tv,Nil);
-   return (tv.tv_sec*100)+(tv.tv_usec/10000);
-END
+long GTime(void)
+{
+  struct timeval tv;
+
+  gettimeofday(&tv, NULL);
+  return (tv.tv_sec*100) + (tv.tv_usec/10000);
+}
 
 #endif
-/**
-{****************************************************************************}
-{ Heapfehler abfedern }
 
-        FUNCTION MyHeapError(Size:Word):Integer;
-        Far;
- BEGIN
-   IF Size<>0 THEN WrError(10006);
-   MyHeapError:=1;
-END;
-**/
 /*-------------------------------------------------------------------------*/
 /* Stackfehler abfangen - bis auf DOS nur Dummies */
 
 #ifdef __TURBOC__
+
 #ifdef __DPMI16__
 #else
-unsigned _stklen=STKSIZE;
-unsigned _ovrbuffer=64*48;
+unsigned _stklen = STKSIZE;
+unsigned _ovrbuffer = 64*48;
 #endif
 #include <malloc.h>
-#endif
 
-        void ChkStack(void)
-BEGIN
-#ifdef __TURBOC__
-   LongWord avail=stackavail();
-   if (avail<MinStack) WrError(10007);   
-   if (avail<LowStack) LowStack=avail;
-#endif
-END
+void ChkStack(void)
+{
+  LongWord avail = stackavail();
+  if (avail < MinStack)
+    WrError(ErrNum_StackOvfl);
+  if (avail < LowStack)
+    LowStack = avail;
+}
 
-        void ResetStack(void)
-BEGIN
-#ifdef __TURBOC__
-   LowStack=stackavail();
-#endif
-END
+void ResetStack(void)
+{
+  LowStack = stackavail();
+}
 
-        LongWord StackRes(void)
-BEGIN
-#ifdef __TURBOC__
-   return LowStack-MinStack;
-#else
-   return 0;
-#endif
-END
+LongWord StackRes(void)
+{
+  return LowStack - MinStack;
+}
+#endif /* __TURBOC__ */
 
 #ifdef CKMALLOC
 #undef malloc
 #undef realloc
 
-        void *ckmalloc(size_t s)
-BEGIN
-   void *tmp=malloc(s);
-   if (tmp==NULL) WrError(10006);
-   return tmp;
-END
+void *ckmalloc(size_t s)
+{
+  void *tmp;
 
-        void *ckrealloc(void *p, size_t s)
-BEGIN
-   void *tmp=realloc(p,s);
-   if (tmp==NULL) WrError(10006);
-   return tmp;
-END
+#ifdef __TURBOC__
+  if (coreleft() < HEAPRESERVE + s)
+    WrError(ErrNum_HeapOvfl);
 #endif
 
-	void asmsub_init(void)
-BEGIN
-   char *CMess=InfoMessCopyright;
-   Word z;
-   LongWord XORVal;
+  tmp = malloc(s);
+  if (!tmp && (s > 0))
+    WrError(ErrNum_HeapOvfl);
+  return tmp;
+}
+
+void *ckrealloc(void *p, size_t s)
+{
+  void *tmp;
+
+#ifdef __TURBOC__
+  if (coreleft() < HEAPRESERVE + s)
+    WrError(ErrNum_HeapOvfl);
+#endif
+
+  tmp = realloc(p, s);
+  if (!tmp)
+    WrError(ErrNum_HeapOvfl);
+  return tmp;
+}
+#endif
+
+static void SetValidSymChar(unsigned Ch, Byte Value)
+{
+  ValidSymChar[Ch] = Value;
+}
+
+static void SetValidSymChars(unsigned Start, unsigned Stop, Byte Value)
+{
+  for (; Start <= Stop; Start++)
+    SetValidSymChar(Start, Value);
+}
+
+void asmsub_init(void)
+{
+#ifdef __TURBOC__
+#ifdef __MSDOS__
+#ifdef __DPMI16__
+  char *MemFlag, *p;
+  String MemVal, TempName;
+  unsigned long FileLen;
+#else
+  char *envval;
+  int ovrerg;
+#endif
+#endif
+#endif
+
+  InitStringList(&CopyrightList);
+  InitStringList(&OutList);
+  InitStringList(&ShareOutList);
+  InitStringList(&ListOutList);
 
 #ifdef __TURBOC__
 #ifdef __MSDOS__
 #ifdef __DPMI16__
-   char *MemFlag,*p;
-   String MemVal,TempName;
-   unsigned long FileLen;
+  /* Fuer DPMI evtl. Swapfile anlegen */
+
+  MemFlag = getenv("ASXSWAP");
+  if (MemFlag)
+  {
+    strmaxcpy(MemVal, MemFlag, STRINGSIZE);
+    p = strchr(MemVal, ',');
+    if (!p)
+      strcpy(TempName, "ASX.TMP");
+    else
+    {
+      *p = NULL;
+      strcpy(TempName, MemVal);
+      strmov(MemVal, p + 1);
+    };
+    KillBlanks(TempName);
+    KillBlanks(MemVal);
+    FileLen = strtol(MemFlag, &p, 0);
+    if (*p != '\0')
+    {
+      fputs(getmessage(Num_ErrMsgInvSwapSize), stderr);
+      exit(4);
+    }
+    if (MEMinitSwapFile(TempName, FileLen << 20) != RTM_OK)
+    {
+      fputs(getmessage(Num_ErrMsgSwapTooBig), stderr);
+      exit(4);
+    }
+  }
 #else
-   char *envval;
-   int ovrerg;
-#endif
-#endif
-#endif
+  /* Bei DOS Auslagerung Overlays in XMS/EMS versuchen */
 
-   for (z=0; z<strlen(CMess); z++)
-    BEGIN
-     XORVal=CMess[z];
-     XORVal=XORVal << (((z+1) % 4)*8);
-     Magic=Magic ^ XORVal;
-    END
-
-   InitStringList(&CopyrightList);
-   InitStringList(&OutList);
-   InitStringList(&ShareOutList);
-
-#ifdef __TURBOC__
-#ifdef __MSDOS__
-#ifdef __DPMI16__
-   /* Fuer DPMI evtl. Swapfile anlegen */
-
-   MemFlag=getenv("ASXSWAP");
-   if (MemFlag!=Nil)
-    BEGIN
-     strmaxcpy(MemVal,MemFlag,255);
-     p=strchr(MemVal,',');
-     if (p==Nil) strcpy(TempName,"ASX.TMP");
-     else
-      BEGIN
-       *p=Nil; strcpy(TempName,MemVal);
-       strcpy(MemVal,p+1);
-      END;
-     KillBlanks(TempName); KillBlanks(MemVal);
-     FileLen=strtol(MemFlag,&p,0);
-     if (*p!='\0')
-      BEGIN
-       fputs(getmessage(Num_ErrMsgInvSwapSize),stderr); exit(4);
-      END;
-     if (MEMinitSwapFile(TempName,FileLen << 20)!=RTM_OK)
-      BEGIN
-       fputs(getmessage(Num_ErrMsgSwapTooBig),stderr); exit(4);
-      END
-    END
-#else
-   /* Bei DOS Auslagerung Overlays in XMS/EMS versuchen */
-
-   envval=getenv("USEXMS");
-   if ((envval!=Nil) AND (toupper(*envval)=='N')) ovrerg=-1;
-   else ovrerg=_OvrInitExt(0,0);
-   if (ovrerg!=0)
-    BEGIN
-     envval=getenv("USEEMS");
-     if ((envval==Nil) OR (toupper(*envval)!='N')) _OvrInitEms(0,0,0);
-    END
+  envval = getenv("USEXMS");
+  if ((envval) && (mytoupper(*envval) == 'N'))
+    ovrerg = -1;
+  else
+    ovrerg = _OvrInitExt(0, 0);
+  if (ovrerg != 0)
+  {
+    envval = getenv("USEEMS");
+    if ((!envval) || (mytoupper(*envval) != 'N'))
+      _OvrInitEms(0, 0, 0);
+  }
 #endif
 #endif
 #endif
 
 #ifdef __TURBOC__
-   StartStack=stackavail(); LowStack=stackavail();
-   MinStack=StartStack-STKSIZE+0x800;
+  StartStack = stackavail();
+  LowStack = stackavail();
+  MinStack = StartStack - STKSIZE + 0x800;
 #else
-   StartStack=LowStack=MinStack=0;
+  StartStack = LowStack = MinStack = 0;
 #endif
-END
 
+  /* initialize array of valid characters */
+
+  ValidSymCharLen = (NLS_GetCodepage() == eCodepageUTF8) ? 1280 : 256;
+  ValidSymChar = (Byte*) calloc(ValidSymCharLen, sizeof(Byte));
+
+  /* The basic ASCII stuff: letters, dot and underbar are allowed
+     anwhere, numbers not at beginning: */
+
+  SetValidSymChars('a', 'z', VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+  SetValidSymChars('A', 'Z', VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+  SetValidSymChars('0', '9',            VALID_SN |            VALID_MN);
+  SetValidSymChar ('.'     , VALID_S1 | VALID_SN                      );
+  SetValidSymChar ('_'     , VALID_S1 | VALID_SN                      );
+
+  /* Extensions, depending on character set: */
+
+  switch (NLS_GetCodepage())
+  {
+    case eCodepage1251:
+      SetValidSymChar (0xa3      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xb3      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xa8      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xb8      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xaa      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xba      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xaf      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xbf      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xbd      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xbe      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      goto iso8859_1;
+    case eCodepage1252:
+      SetValidSymChar (0x8a      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0x9a      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0x8c      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0x9c      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0x8e      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0x9e      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0x9f      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      goto iso8859_1;
+    case eCodepage850:
+      SetValidSymChars(0xb5, 0xb7, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChars(0xc6, 0xc7, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChars(0xd0, 0xd9, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xde      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChars(0xe0, 0xed, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      /* fall-through */
+    case eCodepage437:
+      SetValidSymChars(128, 165, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (225     , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      break;
+    case eCodepage866:
+      SetValidSymChars(0x80, 0xaf, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChars(0xe0, 0xf7, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      break;
+    case eCodepageISO8859_15:
+      SetValidSymChar (0xa6      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xa8      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xb4      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xb8      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xbc      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xbd      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xbe      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      /* fall-through */
+    case eCodepageISO8859_1:
+    iso8859_1:
+      SetValidSymChar (0xa1      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xa2      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChars(0xc0, 0xff, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      break;
+    case eCodepageKOI8_R:
+      SetValidSymChar (0xa3      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (0xb3      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChars(0xc0, 0xff, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      break;
+    case eCodepageUTF8:
+    {
+      const tNLSCharacterTab *pTab = GetCharacterTab(eCodepageUTF8);
+      tNLSCharacter ch;
+      unsigned Unicode;
+      const char *pCh;
+
+      for (ch = (tNLSCharacter)0; ch < eCH_cnt; ch++)
+      {
+        if ((ch == eCH_e2) || (ch == eCH_mu) || (ch == eCH_iquest) || (ch == eCH_iexcl))
+          continue;
+        pCh = &((*pTab)[ch][0]);
+        Unicode = UTF8ToUnicode(&pCh);
+        if (Unicode < ValidSymCharLen)
+          SetValidSymChar (Unicode, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      }
+
+      /* Greek */
+
+      SetValidSymChar ( 895      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar ( 902      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (1011      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (1016      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (1018      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChar (1019      , VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChars( 904,  974, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChars( 984, 1007, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+
+      /* Cyrillic */
+
+      SetValidSymChars(0x400, 0x481, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+      SetValidSymChars(0x48a, 0x4ff, VALID_S1 | VALID_SN | VALID_M1 | VALID_MN);
+    }
+    default:
+      break;
+  }
+
+#if 0
+  for (z = 0; z < ValidSymCharLen; z++)
+  {
+    if (!(z & 15))
+      fprintf(stderr, "%02x:", z);
+    fprintf(stderr, " %x", ValidSymChar[z]);
+    if ((z & 15) == 15)
+      fprintf(stderr, "\n");
+  }
+#endif
+
+  version_init();
+}

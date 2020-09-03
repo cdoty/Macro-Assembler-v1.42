@@ -190,9 +190,14 @@
 
 back:	nop
 	jr	back
+	j	back	; -> jr
         jre     $-100
+	j	$-100	; -> jre
 	jr	forw
+	j	forw	; -> jr
+	j	end	; -> jr guessed in first pass, jre decided in second/third pass
         jre     $+100
+	j	$+100	; -> jre
 forw:	nop
 
 	ldax	b
@@ -246,7 +251,7 @@ forw:	nop
 	mviw	20h,01101001b
 	mvix	d,22o
 
-	push	va
+	push	v
 	push	b
 	pop	h
 	pop	ea
@@ -255,4 +260,84 @@ forw:	nop
 	skn	hc
 
 	skit	fsr
-	skint	an6
+	sknit	an6
+
+	; iterate through the various aliases allowed for indirect addressing expessions.  The original
+        ; variant mentioned in the NEC manual is listed first.
+
+	ldax	b	; original
+	ldax	(b)
+	ldax	bc
+	ldax	(bc)
+	ldax	d	; original
+	ldax	(d)
+	ldax	de
+	ldax	(de)
+	ldax	h	; original
+	ldax	(h)
+	ldax	hl
+	ldax	(hl)
+	ldax	d+	; original
+	ldax	(d+)
+	ldax	de+
+	ldax	(de+)
+	ldax	(de)+
+	ldax	h+	; original
+	ldax	(h+)
+	ldax	hl+
+	ldax	(hl+)
+	ldax	(hl)+
+	ldax	d-	; original
+	ldax	(d-)
+	ldax	de-
+	ldax	(de-)
+	ldax	(de)-
+	ldax	h-	; original
+	ldax	(h-)
+	ldax	hl-
+	ldax	(hl-)
+	ldax	(hl)-
+	ldax	h+a	; original
+	ldax	(h+a)
+	ldax	hl+a
+	ldax	(hl+a)
+	ldax	a+h
+	ldax	(a+h)
+	ldax	a+hl
+	ldax	(a+hl)
+	ldax	h+b	; original
+	ldax	(h+b)
+	ldax	hl+b
+	ldax	(hl+b)
+	ldax	b+h
+	ldax	(b+h)
+	ldax	b+hl
+	ldax	(b+hl)
+	ldax	h+ea	; original
+	ldax	(h+ea)
+	ldax	hl+ea
+	ldax	(hl+ea)
+	ldax	ea+h
+	ldax	(ea+h)
+	ldax	ea+hl
+	ldax	(ea+hl)
+	ldax	h+12h	; original
+	ldax	(h+12h)
+	ldax	hl+12h
+	ldax	(hl+12h)
+	ldax	d+12h	; original
+	ldax	(d+12h)
+	ldax	de+12h
+	ldax	(de+12h)
+	ldeax	d++	; original
+	ldeax	(d++)
+	ldeax	de++
+	ldeax	(de++)
+	ldeax	(de)++
+	ldeax	h++	; original
+	ldeax	(h++)
+	ldeax	hl++
+	ldeax	(hl++)
+	ldeax	(hl)++
+
+end:

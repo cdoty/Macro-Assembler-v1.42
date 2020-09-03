@@ -1,28 +1,34 @@
 /* version.c */
 /*****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only                     */
+/*                                                                           */
 /* AS-Portierung                                                             */
 /*                                                                           */
 /* Lagert die Versionsnummer                                                 */
 /*                                                                           */
-/* Historie: 14.10.1997 Grundsteinlegung                                     */
-/*           25. 7.1998 Version 1.41r8beta                                   */
-/*           18.10.1998 Build 4                                              */
-/*           25.10.1998 Build 5                                              */
-/*           10. 1.1999 Build 6                                              */
-/*           17. 1.1999 Build 7                                              */
-/*           27. 1.1999 Build 8                                              */
-/*           27. 1.1999 Build 9                                              */
-/*            7. 2.1999 Build 10                                             */
-/*           19. 4.1999 Build 11                                             */
-/*           20. 4.1999 Build 12                                             */
-/*            2. 5.1999 Build 13                                             */
-/*            6. 7.1999 Build 14                                             */
-/*           15. 9.1999 Build 15                                             */
-/*            7.11.1999 Final Build                                          */
-/*                                                                           */
 /*****************************************************************************/
 
 #include "stdinc.h"
+#include <string.h>
 
-char *Version="1.41r8";
-LongInt VerNo=0x1418;
+const char *Version = "1.42 Beta [Bld 173]";
+const char *DebVersion = "1.42bld173-1";
+LongInt VerNo = 0x142f;
+
+const char *InfoMessCopyright = "(C) 1992,2020 Alfred Arnold";
+
+LongInt Magic = 0x12372c46;
+
+void version_init(void)
+{
+  unsigned int z;
+  const char *CMess = InfoMessCopyright;
+  LongWord XORVal;
+
+  for (z = 0; z < strlen(CMess); z++)
+  {
+    XORVal = CMess[z];
+    XORVal = XORVal << (((z + 1) % 4) * 8);
+    Magic = Magic ^ XORVal;
+  }
+}

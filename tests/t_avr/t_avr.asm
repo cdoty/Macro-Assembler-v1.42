@@ -9,7 +9,7 @@
 
 	and     r2,r16
 
-	andi    r19,$aa
+	andi    r19,0xaa
 
 	adiw    r26,14
 
@@ -63,11 +63,11 @@ next:
 
 	bst     r1,2
 
-;	call    $123456
+;	call    0x123456
 
-	cbr     r16,$f0
+	cbr     r16,0xf0
 
-	cbi     $12,7
+	cbi     0x12,7
 
 	clc
 
@@ -105,11 +105,11 @@ next:
 
 	ijmp
 
-	in      r23,$34
+	in      r23,0x34
 
 	inc     r22
 
-;	jmp     $123456
+;	jmp     0x123456
 
 	ld      r2,x
 	ld      r0,x+
@@ -118,16 +118,16 @@ next:
 	ld      r1,y
 	ld      r0,y+
 	ld      r3,-y
-	ldd     r4,y+$33
+	ldd     r4,y+0x33
 
 	ld      r1,z
 	ld      r0,z+
 	ld      r3,-z
-	ldd     r4,z+$33
+	ldd     r4,z+0x33
 
-	ldi     r30,$f0
+	ldi     r30,0xf0
 
-	lds     r2,$ff00
+	lds     r2,0xff00
 
 	lpm
 
@@ -145,9 +145,9 @@ next:
 
 	or      r15,r16
 
-	ori     r16,$f0
+	ori     r16,0xf0
 
-	out     $18,r16
+	out     0x18,r16
 
 	pop     r13
 
@@ -167,13 +167,13 @@ next:
 
 	sbc     r3,r1
 
-	sbci    r17,$4f
+	sbci    r17,0x4f
 
-	sbi     $1c,3
+	sbi     0x1c,3
 
-	sbic    $1c,1
+	sbic    0x1c,1
 
-	sbis    $10,3
+	sbis    0x10,3
 
 	sbr     r16,3
 
@@ -215,11 +215,11 @@ next:
 	st      -z,r3
 	std     z+2,r4
 
-	sts     $ff00,r2
+	sts     0xff00,r2
 
 	sub     r13,r12
 
-	subi    r22,$11
+	subi    r22,0x11
 
 	swap    r1
 
@@ -227,3 +227,54 @@ next:
 
 	wdr
 
+	packing	off
+	data	1,2,3
+	data	0
+	data	255
+	data	-128
+	data	65535
+	data	-32768
+	data	'a'
+	data	'ab'
+	expect	360
+	data	"a"
+	endexpect
+	data	"ab"
+	expect	360
+	data	"abc"
+	endexpect
+	data	"abcd"
+
+	packing	on
+	expect	360
+	data	1,2,3
+	endexpect
+	expect	360
+	data	0
+	endexpect
+	expect	360
+	data	255
+	endexpect
+	expect	360
+	data	-128
+	endexpect
+	expect	1320
+	data	65535
+	endexpect
+	expect	1315
+	data	-32768
+	endexpect
+	expect	360
+	data	'a'
+	endexpect
+	expect	1320
+	data	'ab'
+	endexpect
+	expect	360
+	data	"a"
+	endexpect
+	data	"ab"
+	expect	360
+	data	"abc"
+	endexpect
+	data	"abcd"

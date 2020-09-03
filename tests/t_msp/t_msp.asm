@@ -1,4 +1,5 @@
         cpu     msp430
+	page	0
 
         include regmsp.inc
 
@@ -42,6 +43,9 @@ toni    equ     01114h
         jmp     234h
         jne     $
         jn      $+2
+
+	mov	0(r5),4(r5)	; result in same machine code
+	mov	@r5,4(r5)
 
 ;----------------------------------
 ; emulierte Befehle
@@ -101,16 +105,20 @@ toni    equ     01114h
         padding on
         .byte   1,2,3,4
         .byte   "Hello world"
+	.word	1,2,3,4		; inserts padding
         .byte   "Hello world!"
-        .word   1,2,3,4
+        .word   1,2,3,4		; no padding needed
         .bss    20
         .bss    21
+	.word	1,2,3,4		; inserts padding
 
         padding off
         .byte   1,2,3,4
         .byte   "Hello world"
         .byte   "Hello world!"
+	expect	180
         .word   1,2,3,4
+	endexpect
         .bss    20
         .bss    21
 

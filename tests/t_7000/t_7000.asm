@@ -92,11 +92,24 @@
 	bt	targ
 targ:	bf	targ
 	bt/s	targ
-        bf/s	targ
-	bra	targ
-	bsr	targ
-	jmp	@r5
-	jsr	@r10
+	expect	200
+         bf/s	 targ
+	endexpect
+	expect	200
+ 	 bra	 targ
+	endexpect
+	expect	200
+	 braf	 r2
+	endexpect
+	expect	200
+	 bsr	 targ
+	endexpect
+	expect	200
+	 jmp	 @r5
+	endexpect
+	expect	200
+	 jsr	 @r10
+	endexpect
 
 	ldc	r5,sr
 	ldc	r10,gbr
@@ -247,3 +260,14 @@ wdata:	dc.w	$1234
         shad	r3,r7
         shld	r12,sp
 
+	dsp	on
+
+	irp	reg,dsr,a0,x0,x1,y0,y1
+	lds	r7,reg
+	lds	@r9+,reg
+	endm
+
+	irp	reg,dsr,a0,x0,x1,y0,y1
+	sts	reg,r7
+	sts	reg,@-r9
+	endm

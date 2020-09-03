@@ -25,7 +25,6 @@ targ:	jrs	t,targ
 	jr	ge,targ
 	jr	le,targ
 	jr	gt,targ
-	jr	targ
 
 	daa	a
 	daa	b
@@ -80,6 +79,7 @@ targ:	jrs	t,targ
 	mcmp	(c+hl),55h
 	mcmp	(pc+a),55h
 
+
 	inc	c
 	inc	bc
 	inc	(12h)
@@ -106,6 +106,9 @@ targ:	jrs	t,targ
 	mul	d,e
 	mul	l,h
 
+targ2:
+	jr	targ2
+
 	div	wa,c
 	div	de,c
 	div	hl,c
@@ -131,8 +134,12 @@ targ:	jrs	t,targ
 	xch	(12h),c
 	xch	d,(hl)
 	xch	(de),e
-	xch	l,(hl+)
-	xch	(hl+),h
+	expect	140
+	 xch	 l,(hl+)
+	endexpect
+	expect	140
+	 xch	 (hl+),h
+	endexpect
 	xch	a,(-hl)
 	xch	(-hl),w
 	xch	b,(hl+5)
@@ -164,7 +171,9 @@ targ:	jrs	t,targ
 	ld	d,(hl)
 	ld	c,(de)
 	ld	b,(-hl)
-	ld	h,(hl+)
+	expect	140
+	 ld	 h,(hl+)
+	endexpect
 	ld	c,(hl-122)
 	ld	w,(hl+c)
 	ld      d,(a+pc)
